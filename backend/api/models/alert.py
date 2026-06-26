@@ -2,7 +2,7 @@ from typing import Optional
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -20,9 +20,17 @@ class Alert(Base):
         UUID(as_uuid=True), ForeignKey("ai_predictions.id"), nullable=True
     )
     # Matches alert_severity ENUM: INFO | WARNING | CRITICAL
-    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Matches alert_severity ENUM: INFO | WARNING | CRITICAL
+    severity: Mapped[str] = mapped_column(
+        Enum("INFO", "WARNING", "CRITICAL", name="alert_severity", create_type=False),
+        nullable=False,
+    )
     # Matches alert_status ENUM: OPEN | ACKNOWLEDGED | RESOLVED | SNOOZED
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="OPEN")
+    status: Mapped[str] = mapped_column(
+        Enum("OPEN", "ACKNOWLEDGED", "RESOLVED", "SNOOZED", name="alert_status", create_type=False),
+        nullable=False,
+        default="OPEN",
+    )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

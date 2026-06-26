@@ -50,8 +50,10 @@ from models.prediction import AIPrediction
 
 # ── ML model import ──────────────────────────────────────────────────────────
 # Resolves backend/ml-models/stockout/model.py regardless of working directory.
-_ML_MODEL_DIR = os.path.join(os.path.dirname(__file__), "../../../ml-models/stockout")
-_ML_MODEL_DIR = os.path.normpath(_ML_MODEL_DIR)
+# ml-models is mounted at /app/ml-models in the api + celery containers
+# (override with ML_MODELS_DIR). Absolute path resolves regardless of the
+# module's location, matching redistribution.py / assistant.py.
+_ML_MODEL_DIR = os.path.join(os.environ.get("ML_MODELS_DIR", "/app/ml-models"), "stockout")
 if _ML_MODEL_DIR not in sys.path:
     sys.path.insert(0, _ML_MODEL_DIR)
 

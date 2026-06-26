@@ -38,15 +38,20 @@ slowapi==0.1.9
 python-dotenv==1.0.1
 tenacity==9.0.0
 
-# ML (installed in worker image, listed for completeness)
-# prophet==1.1.5
-# xgboost==2.1.1
-# lightgbm==4.5.0
-# ortools==9.10.4067
-# scikit-learn==1.5.2
-# pyod==2.0.2
-# pandas==2.2.3
-# numpy==2.1.2
+# ML (used by ml-models/* — mounted at /app/ml-models in api + celery containers)
+prophet==1.1.5
+# prophet 1.1.5 ships a minimal bundled cmdstan (precompiled binary only).
+# cmdstanpy >=1.2 rejects it for a "missing makefile"; pin to a version that
+# accepts prophet's bundle so the Stan backend loads.
+cmdstanpy==1.1.0
+xgboost==2.1.1
+lightgbm==4.5.0
+ortools==9.10.4067
+scikit-learn==1.5.2
+pyod==2.0.2
+pandas==2.2.3
+# prophet 1.1.5 uses np.float_ (removed in NumPy 2.0), so pin to the 1.26 line.
+numpy==1.26.4
 
 # Testing
 pytest==8.3.3

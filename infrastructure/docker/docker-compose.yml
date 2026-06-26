@@ -67,6 +67,7 @@ services:
       - smarthealth
     volumes:
       - ml_artefacts:/app/ml-models/artefacts
+      - ../../backend/ml-models:/app/ml-models
 
   celery-worker:
     build:
@@ -89,6 +90,7 @@ services:
       - smarthealth
     volumes:
       - ml_artefacts:/app/ml-models/artefacts
+      - ../../backend/ml-models:/app/ml-models
 
   celery-beat:
     build:
@@ -106,6 +108,9 @@ services:
       - celery-worker
     networks:
       - smarthealth
+    volumes:
+      - ml_artefacts:/app/ml-models/artefacts
+      - ../../backend/ml-models:/app/ml-models
 
   dashboard:
     build:

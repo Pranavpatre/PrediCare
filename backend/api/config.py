@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
 
+    # Dev-only login bypass: in non-production, this OTP is always accepted for
+    # any existing active user (SMS/WhatsApp delivery is not wired up locally).
+    # Never honoured when environment == "production".
+    dev_login_otp: str = "000000"
+
     # JWT
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7

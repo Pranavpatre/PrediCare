@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -42,7 +42,10 @@ class Facility(Base):
     code: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     # Matches facility_type ENUM: PHC | CHC | SUB_CENTRE | DISTRICT_HOSPITAL
-    facility_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    facility_type: Mapped[str] = mapped_column(
+        Enum("PHC", "CHC", "SUB_CENTRE", "DISTRICT_HOSPITAL", name="facility_type", create_type=False),
+        nullable=False,
+    )
     # PostGIS Point geometry, SRID 4326
     location: Mapped[Optional[Geometry]] = mapped_column(
         Geometry("POINT", srid=4326), nullable=True

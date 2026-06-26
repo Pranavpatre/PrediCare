@@ -188,8 +188,7 @@ def retrain_model(self, model_version: str) -> dict:
 
     # ── Attempt to call the ML trainer module if it exists ───────────────────
     trainer_path = os.path.join(
-        os.path.dirname(__file__),
-        "../../../../ml-models",
+        os.environ.get("ML_MODELS_DIR", "/app/ml-models"),
         model_family,
         "train.py",
     )

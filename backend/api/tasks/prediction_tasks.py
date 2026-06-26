@@ -21,10 +21,12 @@ import sys
 
 from celery_app import celery_app
 
-# Prepend ML model source trees so local modules are importable once present.
-_BASE = os.path.dirname(__file__)
-sys.path.insert(0, os.path.join(_BASE, "../../../../ml-models/stockout"))
-sys.path.insert(0, os.path.join(_BASE, "../../../../ml-models/diagnostics"))
+# Prepend ML model source trees so local modules are importable.
+# ml-models is mounted at /app/ml-models in the celery containers (override
+# with ML_MODELS_DIR).
+_ML_BASE = os.environ.get("ML_MODELS_DIR", "/app/ml-models")
+sys.path.insert(0, os.path.join(_ML_BASE, "stockout"))
+sys.path.insert(0, os.path.join(_ML_BASE, "diagnostics"))
 
 log = logging.getLogger(__name__)
 
