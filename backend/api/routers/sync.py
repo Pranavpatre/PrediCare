@@ -467,7 +467,7 @@ async def pull_sync(
         for f in fac_result.scalars().all()
     ]
 
-    # ── Medicines delta ────────────────────────────────────────────────────
+    # ── Medicines delta ───────────────────────────────────────────────────
     # Medicines have no updated_at; return all active medicines (table is small).
     # A future optimisation could track a medicines updated_at.
     med_result = await db.execute(

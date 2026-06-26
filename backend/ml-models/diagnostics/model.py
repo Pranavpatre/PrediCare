@@ -73,7 +73,7 @@ class DiagnosticsPredictor:
     4. Persist / reload with save() / load().
 
     Equipment uptime adjustment
-    ----------------------------
+    ---------------------------
     When avg equipment_uptime < 0.95 across the training window, the raw
     predicted usage is multiplied by the uptime factor on inference.  This
     reflects the fact that a machine that is down 20 % of the time can only
@@ -97,7 +97,7 @@ class DiagnosticsPredictor:
         self._avg_uptime: float = 1.0   # learned from training data
         self._is_trained: bool = False
 
-    # ── Feature engineering ──────────────────────────────────────────────
+    # ── Feature engineering ───────────────────────────────────────────────
 
     @staticmethod
     def _is_monsoon(dt: pd.Timestamp) -> int:
@@ -201,12 +201,11 @@ class DiagnosticsPredictor:
         )
         self._prophet.fit(prophet_df)
 
-        # ── Stage 2: XGBoost on Prophet residuals ───────────────────
+        # ── Stage 2: XGBoost on Prophet residuals ─────────────────────
         prophet_pred = self._prophet.predict(prophet_df[["ds"]])
         df = df.merge(prophet_pred[["ds", "yhat"]], on="ds", how="left")
         df["residual"] = df["y"] - df["yhat"]
         df = self._build_features(df)
-
 
         # Attach disease-calendar weights (from disease_events table)
         if disease_weights:
@@ -254,7 +253,7 @@ class DiagnosticsPredictor:
         )
         return mae
 
-    # ── Prediction ────────────────────────────────────────────────────────────
+    # ── Prediction ────────────────────────────────────────────────────────
 
     def predict(
         self,
@@ -300,7 +299,6 @@ class DiagnosticsPredictor:
         if not self._is_trained:
             raise RuntimeError("Model not trained. Call train() first.")
 
-
         # Use inference-time uptime override if supplied, otherwise training average
         uptime = equipment_uptime if equipment_uptime is not None else self._avg_uptime
         uptime = max(0.0, min(1.0, uptime))
@@ -331,13 +329,13 @@ class DiagnosticsPredictor:
         else:
             daily_usage = yhat_base
 
-        # ── Equipment uptime adjustment ──────────────────────────────
+        # ── Equipment uptime adjustment ────────────────────────────────
         # If equipment is not always available, effective daily throughput is
         # reduced proportionally.  e.g. uptime=0.80 → only 80 % of kits used.
         if uptime < 0.95:
             daily_usage = daily_usage * uptime
 
-        # ── Rolling stock depletion simulation ──────────────────────
+        # ── Rolling stock depletion simulation ────────────────────────
         cumulative = np.cumsum(daily_usage)
         days_until_stockout = horizon_days  # default: no stockout within horizon
         for i, c in enumerate(cumulative):
@@ -376,7 +374,7 @@ class DiagnosticsPredictor:
             predicted_daily_usage=[round(float(v), 2) for v in daily_usage],
         )
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # ── Internal helpers ──────────────────────────────────────────────────
 
     def _estimate_confidence(
         self, daily_usage: np.ndarray, uptime: float = 1.0
@@ -462,7 +460,7 @@ class DiagnosticsPredictor:
             )
         return "OK: Diagnostic kit stock level adequate for forecast period."
 
-    # ── Persistence ─────────────────────────────────────────────────────────────
+    # ── Persistence ───────────────────────────────────────────────────────
 
     def save(self, path: str) -> None:
         """

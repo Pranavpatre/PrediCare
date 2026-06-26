@@ -15,16 +15,6 @@ instructed not to speculate beyond the provided data.
 
 from __future__ import annotations
 
-import sys
-import os
-
-# Co-located with health scoring module (Module 05) as per the project plan.
-sys.path.insert(
-    0,
-    os.path.join(os.path.dirname(__file__), "../../../../ml-models/health-score"),
-)
-from assistant import HealthAssistant, DistrictContext  # noqa: E402
-
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -334,6 +324,19 @@ async def query_assistant(
     # ------------------------------------------------------------------
     # Assemble context and call the assistant
     # ------------------------------------------------------------------
+    # Lazy-import the ML assistant module so a missing ml-models dir or the
+    # Gemini SDK does not crash API startup. Mirrors predict.py /
+    # redistribution.py, which also resolve ml-models at request time.
+    import os
+    import sys
+
+    _ml_health_dir = os.path.join(
+        os.environ.get("ML_MODELS_DIR", "/app/ml-models"), "health-score"
+    )
+    if _ml_health_dir not in sys.path:
+        sys.path.insert(0, _ml_health_dir)
+    from assistant import HealthAssistant, DistrictContext  # noqa: E402
+
     context = DistrictContext(
         district_name=district_name,
         total_facilities=total_facilities,

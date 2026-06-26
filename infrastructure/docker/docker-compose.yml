@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   postgres:
-    image: timescale/timescaledb-ha:pg16-latest
+    image: timescale/timescaledb-ha:pg16-all
     container_name: smarthealth-postgres
     restart: unless-stopped
     environment:
@@ -96,7 +96,7 @@ services:
       dockerfile: Dockerfile
     container_name: smarthealth-celery-beat
     restart: unless-stopped
-    command: celery -A celery_app beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    command: celery -A celery_app beat --loglevel=info
     env_file:
       - .env
     environment:
