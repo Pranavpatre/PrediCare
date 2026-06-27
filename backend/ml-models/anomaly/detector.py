@@ -102,9 +102,12 @@ class AnomalyDetector:
 
         X = np.array([[footfall, stock_consumption_delta, diagnostic_kit_usage, doctor_count]])
 
-        raw_score = self._model.decision_function(X)[0]
-        # IForest decision_function: lower = more anomalous; normalise to 0–1
-        normalised = float(1.0 / (1.0 + np.exp(raw_score)))
+        # pyod's IForest.decision_function returns HIGHER = more anomalous
+        # (the opposite of sklearn). Use predict_proba with the 'unify' method
+        # to map the raw score to a calibrated 0–1 outlier probability against
+        # the training distribution: in-distribution points score near 0 and
+        # extreme points approach 1.
+        normalised = float(self._model.predict_proba(X, method="unify")[0, 1])
 
         is_anomaly = bool(normalised > SEVERITY_THRESHOLDS["LOW"])
         severity = self._classify_severity(normalised)
