@@ -217,15 +217,38 @@ export default function FacilityDetailPage() {
         </div>
       )}
 
-      {/* Real district footfall (HMIS) */}
-      {facility.real_district_opd_annual != null && (
+      {/* Real district HMIS metrics (data.gov.in) */}
+      {(facility.real_district_opd_annual != null ||
+        facility.real_district_ipd_annual != null ||
+        facility.real_district_stockout_rate != null) && (
         <div className="bg-teal-50 rounded-xl border border-teal-200 p-4">
-          <p className="text-xs font-medium text-teal-700 uppercase tracking-wide">
-            Real district OPD — HMIS {facility.real_district_opd_period} (data.gov.in)
+          <p className="text-xs font-medium text-teal-700 uppercase tracking-wide mb-2">
+            Real district data — HMIS {facility.real_district_hmis_period || facility.real_district_opd_period} · {facility.district_name} district (data.gov.in)
           </p>
-          <p className="text-2xl font-bold text-teal-900 mt-1">
-            {facility.real_district_opd_annual.toLocaleString()} <span className="text-sm font-normal text-teal-700">outpatient visits/yr · {facility.district_name} district</span>
-          </p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {facility.real_district_opd_annual != null && (
+              <div>
+                <p className="text-xl font-bold text-teal-900">{facility.real_district_opd_annual.toLocaleString()}</p>
+                <p className="text-xs text-teal-700">OPD visits / yr</p>
+              </div>
+            )}
+            {facility.real_district_ipd_annual != null && (
+              <div>
+                <p className="text-xl font-bold text-teal-900">{facility.real_district_ipd_annual.toLocaleString()}</p>
+                <p className="text-xs text-teal-700">
+                  IPD admissions / yr
+                  {facility.real_district_ipd_monthly_avg != null &&
+                    ` · ~${Math.round(facility.real_district_ipd_monthly_avg).toLocaleString()}/mo`}
+                </p>
+              </div>
+            )}
+            {facility.real_district_stockout_rate != null && (
+              <div>
+                <p className="text-xl font-bold text-teal-900">{facility.real_district_stockout_rate.toFixed(2)}</p>
+                <p className="text-xs text-teal-700">Essential-drug stock-out signal</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

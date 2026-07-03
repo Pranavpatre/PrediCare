@@ -133,6 +133,11 @@ class FacilityDetailResponse(FacilityResponse):
     # Real district OPD footfall from HMIS (data.gov.in), when available.
     real_district_opd_annual: int | None = None
     real_district_opd_period: str | None = None
+    # Real district HMIS metrics (data.gov.in): IPD head count + medicine stock-out.
+    real_district_ipd_annual: int | None = None
+    real_district_ipd_monthly_avg: float | None = None
+    real_district_stockout_rate: float | None = None
+    real_district_hmis_period: str | None = None
 
 
 class BatchDetail(BaseModel):
@@ -720,6 +725,35 @@ async def get_facility(
             real_opd_annual = int(ff_row.opd_annual) if ff_row.opd_annual is not None else None
             real_opd_period = ff_row.period
 
+    # ── Real district HMIS metrics (IPD, stock-out), matched by district name ──
+    real_ipd_annual: int | None = None
+    real_ipd_monthly: float | None = None
+    real_stockout_rate: float | None = None
+    real_hmis_period: str | None = None
+    if district_row:
+        metric_rows = (
+            await db.execute(
+                sa_text(
+                    """
+                    SELECT DISTINCT ON (metric) metric, annual_value, monthly_avg, period
+                    FROM district_hmis_metrics
+                    WHERE lower(district) = lower(:dname)
+                    ORDER BY metric, period DESC
+                    """
+                ),
+                {"dname": district_row},
+            )
+        ).fetchall()
+        for r in metric_rows:
+            if r.metric == "ipd_headcount":
+                real_ipd_annual = int(r.annual_value) if r.annual_value is not None else None
+                real_ipd_monthly = float(r.monthly_avg) if r.monthly_avg is not None else None
+                real_hmis_period = r.period
+            elif r.metric == "stockout_rate":
+                # rate-type metric — monthly_avg is the meaningful figure
+                real_stockout_rate = float(r.monthly_avg) if r.monthly_avg is not None else None
+                real_hmis_period = real_hmis_period or r.period
+
     # ── Stock summary (per active medicine) ───────────────────────────────
     stock_rows = (
         await db.execute(
@@ -805,6 +839,10 @@ async def get_facility(
         stock_summary=stock_summary,
         real_district_opd_annual=real_opd_annual,
         real_district_opd_period=real_opd_period,
+        real_district_ipd_annual=real_ipd_annual,
+        real_district_ipd_monthly_avg=real_ipd_monthly,
+        real_district_stockout_rate=real_stockout_rate,
+        real_district_hmis_period=real_hmis_period,
     )
 
 

@@ -20,6 +20,10 @@ export interface FacilityDetail extends Facility {
   district_name?: string | null
   real_district_opd_annual?: number | null
   real_district_opd_period?: string | null
+  real_district_ipd_annual?: number | null
+  real_district_ipd_monthly_avg?: number | null
+  real_district_stockout_rate?: number | null
+  real_district_hmis_period?: string | null
 }
 
 export interface StockItem {
