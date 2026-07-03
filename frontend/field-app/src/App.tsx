@@ -1,4 +1,6 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
+import { LANGUAGES } from './i18n'
 import { useAuthStore } from './stores/authStore'
 import OfflineBanner from './components/OfflineBanner'
 import BottomNav from './components/BottomNav'
@@ -13,9 +15,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function LanguageToggle() {
+  const { i18n } = useTranslation()
+  return (
+    <div className="flex items-center justify-end gap-1 px-4 py-2 bg-white border-b border-gray-100">
+      {LANGUAGES.map((l) => (
+        <button
+          key={l.code}
+          onClick={() => i18n.changeLanguage(l.code)}
+          className={`text-xs font-semibold px-2.5 py-1 rounded-md transition-colors ${
+            i18n.language === l.code ? 'bg-teal-600 text-white' : 'bg-gray-100 text-gray-600'
+          }`}
+        >
+          {l.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function AppLayout() {
   return (
     <div className="pb-16">
+      <LanguageToggle />
       <Outlet />
     </div>
   )

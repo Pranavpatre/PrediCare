@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { format } from 'date-fns'
 import { db } from '../db/localDb'
 import { useAuthStore } from '../stores/authStore'
 import { useVoiceInput, parseSpokenNumber } from '../hooks/useVoiceInput'
-import { syncPendingData } from '../sync/syncService'
+import { syncPendingData, queueLedger } from '../sync/syncService'
 import clsx from 'clsx'
 
 function generateClientId() {
@@ -11,8 +12,63 @@ function generateClientId() {
 }
 
 export default function DailyEntryPage() {
-  const { facilityId, userId } = useAuthStore()
+  const { t } = useTranslation()
+  const { facilityId, userId, token } = useAuthStore()
   const today = format(new Date(), 'yyyy-MM-dd')
+
+  // Geofenced check-in state
+  const [checkingIn, setCheckingIn] = useState(false)
+  const [checkInStatus, setCheckInStatus] = useState<{ within: boolean; distance: number } | null>(null)
+  const [checkInError, setCheckInError] = useState<string | null>(null)
+
+  // Bed matrix + test checklist state
+  const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const authHdr = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
+  const [beds, setBeds] = useState<{ bed_type: string; total_beds: number; occupied_beds: number }[]>([])
+  const [bedsSaved, setBedsSaved] = useState(false)
+  const [tests, setTests] = useState<{ test_id: number; test_name: string | null; available: boolean }[]>([])
+  const [testsSaved, setTestsSaved] = useState(false)
+
+  // Rapid footfall tally (general / maternal / emergency)
+  const [tally, setTally] = useState({ general: 0, maternal: 0, emergency: 0 })
+  const [tallySaved, setTallySaved] = useState(false)
+  const bump = (k: 'general' | 'maternal' | 'emergency', d: number) =>
+    setTally((t) => ({ ...t, [k]: Math.max(0, t[k] + d) }))
+  const saveTally = async () => {
+    if (!facilityId) return
+    await queueLedger('footfall', facilityId, tally)   // offline-first: queue + sync if online
+    setTallySaved(true); setTimeout(() => setTallySaved(false), 3000)
+    refreshPending()
+  }
+
+  useEffect(() => {
+    if (!facilityId || !token) return
+    fetch(`${API}/api/v1/ledger/beds/${facilityId}`, { headers: authHdr })
+      .then((r) => r.ok ? r.json() : null).then((d) => d && setBeds(d.beds)).catch(() => {})
+    fetch(`${API}/api/v1/ledger/tests/${facilityId}`, { headers: authHdr })
+      .then((r) => r.ok ? r.json() : null).then((d) => d && setTests(d.tests)).catch(() => {})
+  }, [facilityId, token])
+
+  const setOccupied = (bedType: string, delta: number) =>
+    setBeds((prev) => prev.map((b) => b.bed_type === bedType
+      ? { ...b, occupied_beds: Math.max(0, Math.min(b.total_beds, b.occupied_beds + delta)) } : b))
+
+  const saveBeds = async () => {
+    if (!facilityId) return
+    await queueLedger('beds', facilityId, beds)
+    setBedsSaved(true); setTimeout(() => setBedsSaved(false), 3000)
+    refreshPending()
+  }
+
+  const toggleTest = (testId: number) =>
+    setTests((prev) => prev.map((t) => t.test_id === testId ? { ...t, available: !t.available } : t))
+
+  const saveTests = async () => {
+    if (!facilityId) return
+    await queueLedger('tests', facilityId, tests)
+    setTestsSaved(true); setTimeout(() => setTestsSaved(false), 3000)
+    refreshPending()
+  }
 
   // Patient count state
   const [patientCount, setPatientCount] = useState<string>('')
@@ -48,11 +104,12 @@ export default function DailyEntryPage() {
 
   // Load pending count on mount and after saves
   const refreshPending = async () => {
-    const [f, a] = await Promise.all([
-      db.pendingFootfall.where('synced').equals(0).count(),
-      db.pendingAttendance.where('synced').equals(0).count(),
+    const [f, a, l] = await Promise.all([
+      db.pendingFootfall.filter((r) => !r.synced).count(),
+      db.pendingAttendance.filter((r) => !r.synced).count(),
+      db.pendingLedger.filter((r) => !r.synced).count(),
     ])
-    setPendingCount(f + a)
+    setPendingCount(f + a + l)
   }
 
   useEffect(() => { refreshPending() }, [])
@@ -96,6 +153,48 @@ export default function DailyEntryPage() {
     refreshPending()
   }
 
+  const handleGeoCheckIn = () => {
+    setCheckInError(null)
+    setCheckInStatus(null)
+    if (!navigator.geolocation) {
+      setCheckInError('Geolocation is not available on this device')
+      return
+    }
+    if (!navigator.onLine) {
+      setCheckInError('Geofenced check-in needs a network connection')
+      return
+    }
+    setCheckingIn(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+          const res = await fetch(`${API_URL}/api/v1/attendance/check-in`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              facility_id: facilityId,
+            }),
+          })
+          if (!res.ok) throw new Error(`Check-in failed (HTTP ${res.status})`)
+          const data = await res.json()
+          setCheckInStatus({ within: data.within_geofence, distance: Math.round(data.distance_m ?? 0) })
+        } catch (e) {
+          setCheckInError(e instanceof Error ? e.message : 'Check-in failed')
+        } finally {
+          setCheckingIn(false)
+        }
+      },
+      (err) => {
+        setCheckInError(err.message || 'Could not get your location')
+        setCheckingIn(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    )
+  }
+
   const handleSync = async () => {
     if (!navigator.onLine) {
       setSyncMsg('No internet connection')
@@ -127,7 +226,7 @@ export default function DailyEntryPage() {
 
       {/* Patient Count Section */}
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800">Today's Patient Count</h2>
+        <h2 className="text-base font-semibold text-gray-800">{t('patient.title')}</h2>
 
         <div className="flex gap-3 items-center">
           <input
@@ -165,13 +264,66 @@ export default function DailyEntryPage() {
           disabled={!patientCount}
           className="w-full py-3 rounded-xl bg-teal-600 text-white font-semibold disabled:opacity-40 hover:bg-teal-700 transition-colors"
         >
-          {footfallSaved ? 'Saved ✓' : 'Save Patient Count'}
+          {footfallSaved ? t('tests.saved') : t('patient.save')}
         </button>
+      </section>
+
+      {/* Rapid Footfall Tally */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+        <h2 className="text-base font-semibold text-gray-800">{t('footfall.title')}</h2>
+        {([
+          ['general', t('footfall.general')],
+          ['maternal', t('footfall.maternal')],
+          ['emergency', t('footfall.emergency')],
+        ] as const).map(([key, label]) => (
+          <div key={key} className="flex items-center justify-between">
+            <span className="text-sm font-medium text-gray-800">{label}</span>
+            <div className="flex items-center gap-2">
+              <button onClick={() => bump(key, -1)}
+                className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg">−</button>
+              <span className="w-10 text-center font-bold text-gray-900 text-lg">{tally[key]}</span>
+              <button onClick={() => bump(key, 1)}
+                className="w-9 h-9 rounded-lg bg-teal-100 text-teal-700 font-bold text-lg">+</button>
+            </div>
+          </div>
+        ))}
+        <button onClick={saveTally}
+          className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
+          {tallySaved ? t('footfall.saved') : `${t('footfall.save')} (${tally.general + tally.maternal + tally.emergency})`}
+        </button>
+      </section>
+
+      {/* Geofenced Check-In Section */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+        <h2 className="text-base font-semibold text-gray-800">{t('checkin.title')}</h2>
+        <p className="text-xs text-gray-500 -mt-2">{t('checkin.hint')}</p>
+        <button
+          onClick={handleGeoCheckIn}
+          disabled={checkingIn}
+          className="w-full py-3 rounded-xl bg-teal-600 text-white font-semibold disabled:opacity-40 hover:bg-teal-700 transition-colors"
+        >
+          {checkingIn ? t('checkin.locating') : `📍 ${t('checkin.btn')}`}
+        </button>
+        {checkInStatus && (
+          <div
+            className={clsx(
+              'rounded-xl p-3 text-sm font-medium',
+              checkInStatus.within
+                ? 'bg-green-50 text-green-700 border border-green-200'
+                : 'bg-red-50 text-red-700 border border-red-200',
+            )}
+          >
+            {checkInStatus.within
+              ? `✓ Checked in on-site (${checkInStatus.distance} m from facility)`
+              : `⚠ Outside geofence — ${checkInStatus.distance} m away. Move closer to the facility.`}
+          </div>
+        )}
+        {checkInError && <p className="text-sm text-red-500">{checkInError}</p>}
       </section>
 
       {/* Doctor Attendance Section */}
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800">Doctor Attendance</h2>
+        <h2 className="text-base font-semibold text-gray-800">{t('attendance.title')}</h2>
         <div className="flex gap-3">
           <button
             onClick={() => handleToggleAttendance(true)}
@@ -182,7 +334,7 @@ export default function DailyEntryPage() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
             )}
           >
-            Present
+            {t('attendance.present')}
           </button>
           <button
             onClick={() => handleToggleAttendance(false)}
@@ -193,13 +345,62 @@ export default function DailyEntryPage() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
             )}
           >
-            Absent
+            {t('attendance.absent')}
           </button>
         </div>
         {attendanceSaved && (
           <p className="text-sm text-green-600 font-medium">Attendance saved ✓</p>
         )}
       </section>
+
+      {/* Bed Matrix Section */}
+      {beds.length > 0 && (
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <h2 className="text-base font-semibold text-gray-800">{t('beds.title')}</h2>
+          {beds.map((b) => (
+            <div key={b.bed_type} className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-800">{b.bed_type}</p>
+                <p className="text-xs text-gray-400">{b.occupied_beds} / {b.total_beds} occupied</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setOccupied(b.bed_type, -1)}
+                  className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg disabled:opacity-30"
+                  disabled={b.total_beds === 0}>−</button>
+                <span className="w-8 text-center font-bold text-gray-900">{b.occupied_beds}</span>
+                <button onClick={() => setOccupied(b.bed_type, 1)}
+                  className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg disabled:opacity-30"
+                  disabled={b.total_beds === 0}>+</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={saveBeds}
+            className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
+            {bedsSaved ? t('beds.saved') : t('beds.save')}
+          </button>
+        </section>
+      )}
+
+      {/* Test Availability Checklist */}
+      {tests.length > 0 && (
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+          <h2 className="text-base font-semibold text-gray-800">{t('tests.title')}</h2>
+          {tests.map((tst) => (
+            <div key={tst.test_id} className="flex items-center justify-between">
+              <span className="text-sm text-gray-800">{tst.test_name}</span>
+              <button onClick={() => toggleTest(tst.test_id)}
+                className={clsx('px-4 py-1.5 rounded-full text-xs font-bold transition-all',
+                  tst.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+                {tst.available ? t('tests.available') : t('tests.unavailable')}
+              </button>
+            </div>
+          ))}
+          <button onClick={saveTests}
+            className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
+            {testsSaved ? t('tests.saved') : t('tests.save')}
+          </button>
+        </section>
+      )}
 
       {/* Sync Section */}
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
@@ -208,7 +409,7 @@ export default function DailyEntryPage() {
           disabled={syncing || pendingCount === 0}
           className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors"
         >
-          {syncing ? 'Syncing…' : `Sync Now${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
+          {syncing ? 'Syncing…' : `${t('sync.now')}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
         </button>
         {syncMsg && <p className="text-sm text-gray-600 mt-2 text-center">{syncMsg}</p>}
       </section>

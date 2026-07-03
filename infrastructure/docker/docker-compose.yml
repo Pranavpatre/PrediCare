@@ -116,6 +116,8 @@ services:
     build:
       context: ../../frontend/dashboard
       dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
     container_name: smarthealth-dashboard
     restart: unless-stopped
     environment:

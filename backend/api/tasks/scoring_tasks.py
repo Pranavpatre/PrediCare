@@ -377,3 +377,66 @@ def run_anomaly_scan(self) -> dict:
     except Exception as exc:
         log.error("anomaly_scan_failed", error=str(exc))
         raise self.retry(exc=exc)
+
+
+# ---------------------------------------------------------------------------
+# Staff attendance escalation (Project Pulse Module 3)
+# ---------------------------------------------------------------------------
+
+@celery_app.task(
+    name="tasks.scoring_tasks.run_attendance_escalation",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=120,
+)
+def run_attendance_escalation(self) -> dict:
+    """Escalate facilities with zero on-site (geofenced) attendance for N+
+    consecutive days into the admin feed as CRITICAL alerts.
+
+    Only considers facilities that HAVE attendance history (at least one
+    check-in ever) — facilities that never onboarded attendance are not
+    flagged as "absent". Dedups against alerts opened in the last 24h.
+    """
+    import psycopg2
+
+    days = int(os.environ.get("ATTENDANCE_ESCALATION_DAYS", "3"))
+    try:
+        conn = psycopg2.connect(_sync_db_url())
+        conn.autocommit = False
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO alerts (facility_id, severity, status, title, body)
+            SELECT f.id, 'CRITICAL'::alert_severity, 'OPEN',
+                   'Zero doctor attendance: ' || f.name,
+                   f.name || ' has reported zero on-site attendance for '
+                       || %s || '+ consecutive days. Action recommended.'
+            FROM facilities f
+            WHERE EXISTS (
+                    SELECT 1 FROM staff_attendance a WHERE a.facility_id = f.id
+                  )
+              AND NOT EXISTS (
+                    SELECT 1 FROM staff_attendance a
+                    WHERE a.facility_id = f.id
+                      AND a.within_geofence = TRUE
+                      AND a.attendance_date > CURRENT_DATE - %s
+                  )
+              AND NOT EXISTS (
+                    SELECT 1 FROM alerts al
+                    WHERE al.facility_id = f.id
+                      AND al.title = 'Zero doctor attendance: ' || f.name
+                      AND al.status = 'OPEN'
+                      AND al.created_at >= NOW() - INTERVAL '24 hours'
+                  )
+            """,
+            (days, days),
+        )
+        escalated = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        log.info("attendance_escalation_complete", escalated=escalated, days=days)
+        return {"status": "attendance_escalation_completed", "escalated": escalated}
+    except Exception as exc:
+        log.error("attendance_escalation_failed", error=str(exc))
+        raise self.retry(exc=exc)

@@ -106,7 +106,18 @@ class AlertSummary(BaseModel):
     severity: str
     status: str
     title: str
+    body: str | None = None
     created_at: datetime
+
+
+class StockSummaryItem(BaseModel):
+    """Compact per-medicine stock line for the facility detail view."""
+
+    medicine_id: int
+    medicine_name: str
+    total_stock: int
+    reorder_level: int
+    days_of_stock: float
 
 
 class FacilityDetailResponse(FacilityResponse):
@@ -118,6 +129,10 @@ class FacilityDetailResponse(FacilityResponse):
     health_score_breakdown: HealthScoreBreakdown | None = None
     footfall_7d: list[FootfallSnapshot] = Field(default_factory=list)
     recent_alerts: list[AlertSummary] = Field(default_factory=list)
+    stock_summary: list[StockSummaryItem] = Field(default_factory=list)
+    # Real district OPD footfall from HMIS (data.gov.in), when available.
+    real_district_opd_annual: int | None = None
+    real_district_opd_period: str | None = None
 
 
 class BatchDetail(BaseModel):
@@ -201,7 +216,7 @@ async def list_facilities(
         None, description="PHC | CHC | SUB_CENTRE | DISTRICT_HOSPITAL"
     ),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
     current_user: Any = Depends(_field_plus),
 ) -> list[FacilityResponse]:
@@ -283,6 +298,282 @@ async def list_facilities(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /facilities/stats  (must precede /{facility_id})
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FacilityStats(BaseModel):
+    total: int
+    green: int
+    yellow: int
+    red: int
+    unscored: int
+    avg_score: float | None
+
+
+@router.get("/stats", response_model=FacilityStats, summary="Facility totals + status breakdown")
+async def facility_stats(
+    district_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_field_plus),
+) -> FacilityStats:
+    """Aggregate counts across ALL facilities in scope (not a single page) —
+    powers the dashboard KPIs at national scale."""
+    scope = []
+    params: dict[str, Any] = {}
+    if current_user.role not in ("STATE_ADMIN", "SUPERADMIN"):
+        if current_user.district_id is not None:
+            scope.append("f.district_id = :uds")
+            params["uds"] = current_user.district_id
+        elif current_user.facility_id is not None:
+            scope.append("f.id = :ufid")
+            params["ufid"] = str(current_user.facility_id)
+    if district_id is not None:
+        scope.append("f.district_id = :did")
+        params["did"] = district_id
+    where = ("WHERE " + " AND ".join(scope)) if scope else ""
+
+    row = (
+        await db.execute(
+            sa_text(
+                f"""
+                WITH latest AS (
+                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
+                    FROM facility_health_scores
+                    ORDER BY facility_id, time DESC
+                )
+                SELECT
+                    count(f.id) AS total,
+                    count(*) FILTER (WHERE l.status = 'GREEN')  AS green,
+                    count(*) FILTER (WHERE l.status = 'YELLOW') AS yellow,
+                    count(*) FILTER (WHERE l.status = 'RED')    AS red,
+                    count(*) FILTER (WHERE l.status IS NULL)    AS unscored,
+                    round(avg(l.overall_score), 1)              AS avg_score
+                FROM facilities f
+                LEFT JOIN latest l ON l.facility_id = f.id
+                {where}
+                """
+            ),
+            params,
+        )
+    ).one()
+    return FacilityStats(
+        total=row.total or 0,
+        green=row.green or 0,
+        yellow=row.yellow or 0,
+        red=row.red or 0,
+        unscored=row.unscored or 0,
+        avg_score=float(row.avg_score) if row.avg_score is not None else None,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /facilities/map  (lightweight markers for ALL facilities; must precede /{id})
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MapMarker(BaseModel):
+    id: uuid.UUID
+    name: str
+    lat: float
+    lng: float
+    traffic_light: str | None = None
+    health_score: float | None = None
+
+
+@router.get("/map", response_model=list[MapMarker], summary="All facility markers (for map clustering)")
+async def facilities_map(
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_field_plus),
+) -> list[MapMarker]:
+    """Return a compact marker for every facility in scope in a single query
+    (no per-facility loops) — the map clusters these client-side."""
+    scope = ["f.location IS NOT NULL"]
+    params: dict[str, Any] = {}
+    if current_user.role not in ("STATE_ADMIN", "SUPERADMIN"):
+        if current_user.district_id is not None:
+            scope.append("f.district_id = :uds")
+            params["uds"] = current_user.district_id
+        elif current_user.facility_id is not None:
+            scope.append("f.id = :ufid")
+            params["ufid"] = str(current_user.facility_id)
+    where = "WHERE " + " AND ".join(scope)
+
+    rows = (
+        await db.execute(
+            sa_text(
+                f"""
+                WITH latest AS (
+                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
+                    FROM facility_health_scores
+                    ORDER BY facility_id, time DESC
+                )
+                SELECT f.id, f.name,
+                       ST_Y(f.location) AS lat, ST_X(f.location) AS lng,
+                       l.status AS traffic_light, l.overall_score AS health_score
+                FROM facilities f
+                LEFT JOIN latest l ON l.facility_id = f.id
+                {where}
+                """
+            ),
+            params,
+        )
+    ).fetchall()
+    return [
+        MapMarker(
+            id=r.id, name=r.name, lat=float(r.lat), lng=float(r.lng),
+            traffic_light=r.traffic_light,
+            health_score=float(r.health_score) if r.health_score is not None else None,
+        )
+        for r in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /facilities/nearest  (nearest PHCs/CHCs to a point; must precede /{facility_id})
+# ─────────────────────────────────────────────────────────────────────────────
+
+class NearestFacility(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    facility_type: str
+    lat: float
+    lng: float
+    distance_km: float
+    traffic_light: str | None = None
+    health_score: float | None = None
+    district_name: str | None = None
+
+
+@router.get("/nearest", response_model=list[NearestFacility], summary="Nearest PHCs/CHCs to a location")
+async def nearest_facilities(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    limit: int = Query(10, ge=1, le=50),
+    radius_km: float | None = Query(None, ge=0, description="Optional max radius"),
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_field_plus),
+) -> list[NearestFacility]:
+    """Nearest PHC/CHC facilities to (lat, lng), ordered by distance (PostGIS KNN).
+    Scoped to the user's district for non-privileged roles; nationwide for STATE_ADMIN/SUPERADMIN."""
+    scope = ["f.location IS NOT NULL", "f.facility_type IN ('PHC', 'CHC')"]
+    params: dict[str, Any] = {"lat": lat, "lng": lng, "lim": limit}
+    if current_user.role not in ("STATE_ADMIN", "SUPERADMIN") and current_user.district_id is not None:
+        scope.append("f.district_id = :uds")
+        params["uds"] = current_user.district_id
+    if radius_km is not None:
+        scope.append(
+            "ST_DWithin(f.location::geography, "
+            "ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius_m)"
+        )
+        params["radius_m"] = radius_km * 1000.0
+    where = "WHERE " + " AND ".join(scope)
+
+    rows = (
+        await db.execute(
+            sa_text(
+                f"""
+                WITH latest AS (
+                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
+                    FROM facility_health_scores ORDER BY facility_id, time DESC
+                )
+                SELECT f.id, f.code, f.name, f.facility_type,
+                       ST_Y(f.location) AS lat, ST_X(f.location) AS lng,
+                       ST_Distance(
+                           f.location::geography,
+                           ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography
+                       ) / 1000.0 AS distance_km,
+                       l.status, l.overall_score, d.name AS district_name
+                FROM facilities f
+                JOIN districts d ON d.id = f.district_id
+                LEFT JOIN latest l ON l.facility_id = f.id
+                {where}
+                ORDER BY f.location <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)
+                LIMIT :lim
+                """
+            ),
+            params,
+        )
+    ).fetchall()
+    return [
+        NearestFacility(
+            id=r.id, code=r.code, name=r.name, facility_type=r.facility_type,
+            lat=float(r.lat), lng=float(r.lng), distance_km=round(float(r.distance_km), 2),
+            traffic_light=r.status,
+            health_score=float(r.overall_score) if r.overall_score is not None else None,
+            district_name=r.district_name,
+        )
+        for r in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /facilities/at-risk  (true national bottom-N; must precede /{facility_id})
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AtRiskFacility(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    facility_type: str
+    health_score: float | None
+    traffic_light: str | None
+    active_alerts: int
+
+
+@router.get("/at-risk", response_model=list[AtRiskFacility], summary="Lowest-scoring facilities in scope")
+async def at_risk_facilities(
+    limit: int = Query(5, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_field_plus),
+) -> list[AtRiskFacility]:
+    scope = ["l.overall_score IS NOT NULL"]
+    params: dict[str, Any] = {"lim": limit}
+    if current_user.role not in ("STATE_ADMIN", "SUPERADMIN"):
+        if current_user.district_id is not None:
+            scope.append("f.district_id = :uds")
+            params["uds"] = current_user.district_id
+        elif current_user.facility_id is not None:
+            scope.append("f.id = :ufid")
+            params["ufid"] = str(current_user.facility_id)
+    where = "WHERE " + " AND ".join(scope)
+
+    rows = (
+        await db.execute(
+            sa_text(
+                f"""
+                WITH latest AS (
+                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
+                    FROM facility_health_scores
+                    ORDER BY facility_id, time DESC
+                ),
+                alert_counts AS (
+                    SELECT facility_id, count(*) AS c FROM alerts
+                    WHERE status = 'OPEN' GROUP BY facility_id
+                )
+                SELECT f.id, f.code, f.name, f.facility_type,
+                       l.status, l.overall_score, COALESCE(ac.c, 0) AS alerts
+                FROM facilities f
+                JOIN latest l ON l.facility_id = f.id
+                LEFT JOIN alert_counts ac ON ac.facility_id = f.id
+                {where}
+                ORDER BY l.overall_score ASC
+                LIMIT :lim
+                """
+            ),
+            params,
+        )
+    ).fetchall()
+    return [
+        AtRiskFacility(
+            id=r.id, code=r.code, name=r.name, facility_type=r.facility_type,
+            health_score=float(r.overall_score) if r.overall_score is not None else None,
+            traffic_light=r.status, active_alerts=int(r.alerts),
+        )
+        for r in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /facilities/{facility_id}
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -307,10 +598,21 @@ async def get_facility(
     """
     facility = await _get_facility_or_404(facility_id, db)
 
-    # ── District name ─────────────────────────────────────────────────────
-    district_row = (
-        await db.execute(select(District.name).where(District.id == facility.district_id))
-    ).scalar_one_or_none()
+    # ── District name + coordinates (extracted from PostGIS geometry) ──────
+    meta_row = (
+        await db.execute(
+            select(
+                District.name.label("district_name"),
+                func.ST_Y(Facility.location).label("lat"),
+                func.ST_X(Facility.location).label("lng"),
+            )
+            .join(District, District.id == Facility.district_id)
+            .where(Facility.id == facility_id)
+        )
+    ).one_or_none()
+    district_row = meta_row.district_name if meta_row else None
+    fac_lat = float(meta_row.lat) if meta_row and meta_row.lat is not None else None
+    fac_lng = float(meta_row.lng) if meta_row and meta_row.lng is not None else None
 
     # ── Stock summary: total medicine types, total stock units, expiring soon ─
     now_date = date.today()
@@ -389,6 +691,7 @@ async def get_facility(
             severity=a.severity,
             status=a.status,
             title=a.title,
+            body=a.body,
             created_at=a.created_at,
         )
         for a in recent_alert_rows
@@ -396,6 +699,77 @@ async def get_facility(
 
     # ── Active alert count ────────────────────────────────────────────────
     active_alert_count = await _get_active_alert_count(facility_id, db)
+
+    # ── Real district OPD footfall (HMIS), matched by district name ────────
+    real_opd_annual: int | None = None
+    real_opd_period: str | None = None
+    if district_row:
+        ff_row = (
+            await db.execute(
+                sa_text(
+                    """
+                    SELECT opd_annual, period FROM district_footfall
+                    WHERE lower(district) = lower(:dname)
+                    ORDER BY period DESC LIMIT 1
+                    """
+                ),
+                {"dname": district_row},
+            )
+        ).one_or_none()
+        if ff_row:
+            real_opd_annual = int(ff_row.opd_annual) if ff_row.opd_annual is not None else None
+            real_opd_period = ff_row.period
+
+    # ── Stock summary (per active medicine) ───────────────────────────────
+    stock_rows = (
+        await db.execute(
+            sa_text(
+                """
+                SELECT m.id AS medicine_id, m.name AS medicine_name,
+                       m.reorder_level,
+                       COALESCE(SUM(sb.quantity), 0) AS total_stock
+                FROM medicines m
+                LEFT JOIN stock_batches sb
+                       ON sb.medicine_id = m.id
+                      AND sb.facility_id = :fid
+                      AND sb.quantity > 0
+                      AND sb.expiry_date >= CURRENT_DATE
+                WHERE m.is_active = TRUE
+                GROUP BY m.id, m.name, m.reorder_level
+                ORDER BY m.name
+                """
+            ),
+            {"fid": str(facility_id)},
+        )
+    ).fetchall()
+
+    # Daily consumption proxy from 30-day avg OPD (same heuristic as /stock).
+    avg_opd_val = (
+        await db.execute(
+            sa_text(
+                """
+                SELECT AVG(opd_count) FROM daily_snapshots
+                WHERE facility_id = :fid AND time >= NOW() - INTERVAL '30 days'
+                """
+            ),
+            {"fid": str(facility_id)},
+        )
+    ).scalar_one_or_none()
+    avg_opd = float(avg_opd_val) if avg_opd_val else 0.0
+    num_meds = len(stock_rows) or 1
+    daily_consumption = (avg_opd * 0.5) / num_meds if avg_opd > 0 else 1.0
+    daily_consumption = max(daily_consumption, 1.0)
+
+    stock_summary = [
+        StockSummaryItem(
+            medicine_id=r.medicine_id,
+            medicine_name=r.medicine_name,
+            total_stock=int(r.total_stock or 0),
+            reorder_level=r.reorder_level,
+            days_of_stock=round(int(r.total_stock or 0) / daily_consumption, 1),
+        )
+        for r in stock_rows
+    ]
 
     log.info(
         "facility_detail_fetched",
@@ -412,16 +786,25 @@ async def get_facility(
         address=facility.address,
         bed_capacity=facility.bed_capacity,
         created_at=facility.created_at,
+        lat=fac_lat,
+        lng=fac_lng,
         district_name=district_row,
         latest_health_score=hs.overall_score if hs else None,
         health_score_status=hs.status if hs else None,
         active_alert_count=active_alert_count,
+        # Aliases consumed by the dashboard frontend.
+        health_score=float(hs.overall_score) if hs and hs.overall_score is not None else None,
+        traffic_light=hs.status if hs else None,
+        active_alerts=active_alert_count,
         total_medicine_types=total_medicine_types,
         total_stock_units=total_stock_units,
         expiring_soon_count=expiring_soon_count,
         health_score_breakdown=hs_breakdown,
         footfall_7d=footfall_7d,
         recent_alerts=recent_alerts,
+        stock_summary=stock_summary,
+        real_district_opd_annual=real_opd_annual,
+        real_district_opd_period=real_opd_period,
     )
 
 

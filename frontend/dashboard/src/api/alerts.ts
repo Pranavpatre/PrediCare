@@ -5,13 +5,13 @@ export interface Alert {
   facility_id: string
   facility_name: string
   alert_type: string
-  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  severity: 'INFO' | 'WARNING' | 'CRITICAL'
   medicine_name?: string
   title: string
   body: string
   days_until_stockout?: number
   confidence?: number
-  status: 'PENDING' | 'ACKNOWLEDGED' | 'RESOLVED'
+  status: 'OPEN' | 'ACKNOWLEDGED' | 'RESOLVED' | 'SNOOZED'
   created_at: string
 }
 

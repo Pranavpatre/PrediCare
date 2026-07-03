@@ -1,7 +1,12 @@
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
+import { MapContainer, TileLayer, useMap } from 'react-leaflet'
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { Facility } from '../api/facilities'
+import L from 'leaflet'
+import 'leaflet.markercluster'
+import type { MapMarker } from '../api/facilities'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.markercluster/dist/MarkerCluster.css'
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 
 const TRAFFIC_COLORS: Record<string, string> = {
   GREEN: '#15803D',
@@ -10,51 +15,63 @@ const TRAFFIC_COLORS: Record<string, string> = {
 }
 
 interface Props {
-  facilities: Facility[]
+  markers: MapMarker[]
 }
 
-export default function FacilityMap({ facilities }: Props) {
+// Imperative cluster layer — adds all markers straight to a Leaflet
+// markerClusterGroup (no per-marker React element), so it scales to 50k+ points.
+function ClusterLayer({ markers }: { markers: MapMarker[] }) {
+  const map = useMap()
   const navigate = useNavigate()
-  // Default center: Pune district
-  const center: [number, number] = [18.52, 73.86]
+
+  useEffect(() => {
+    const valid = markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
+    if (valid.length === 0) return   // skip the initial empty render (avoids invalid bounds)
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const group = (L as any).markerClusterGroup({
+      maxClusterRadius: 55,
+      showCoverageOnHover: false,
+    })
+
+    const layers = valid.map((m) => {
+      const color = (m.traffic_light && TRAFFIC_COLORS[m.traffic_light]) || '#6B7280'
+      const marker = L.circleMarker([m.lat, m.lng], {
+        radius: 6, fillColor: color, color: '#fff', weight: 1.5, fillOpacity: 0.9,
+      })
+      marker.bindPopup(
+        `<strong>${m.name}</strong><br/>Score: ${m.health_score ?? '—'}/100` +
+        `<br/><a href="/facilities/${m.id}" style="color:#0d9488">View detail →</a>`,
+      )
+      marker.on('click', () => navigate(`/facilities/${m.id}`))
+      return marker
+    })
+    group.addLayers(layers)   // bulk add — fast + synchronous
+    map.addLayer(group)
+
+    const bounds = L.latLngBounds(valid.map((m) => [m.lat, m.lng] as [number, number]))
+    if (bounds.isValid()) {
+      try { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 }) } catch { /* ignore */ }
+    }
+    return () => {
+      try { map.removeLayer(group) } catch { /* ignore */ }
+    }
+  }, [markers, map, navigate])
+
+  return null
+}
+
+export default function FacilityMap({ markers }: Props) {
+  // Fallback center: geographic centre of India (until bounds are fitted).
+  const center: [number, number] = [22.0, 79.0]
 
   return (
-    <MapContainer center={center} zoom={10} style={{ height: '420px', width: '100%', borderRadius: '8px' }}>
+    <MapContainer center={center} zoom={5} style={{ height: '420px', width: '100%', borderRadius: '8px' }}>
       <TileLayer
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         attribution='&copy; <a href="https://openstreetmap.org">OpenStreetMap</a>'
       />
-      {facilities
-        .filter((f) => Number.isFinite(f.lat) && Number.isFinite(f.lng))
-        .map((f) => (
-        <CircleMarker
-          key={f.id}
-          center={[f.lat, f.lng]}
-          radius={10}
-          pathOptions={{
-            fillColor: TRAFFIC_COLORS[f.traffic_light] ?? '#6B7280',
-            color: '#fff',
-            weight: 2,
-            fillOpacity: 0.85,
-          }}
-          eventHandlers={{ click: () => navigate(`/facilities/${f.id}`) }}
-        >
-          <Popup>
-            <strong>{f.name}</strong>
-            <br />
-            Score: {f.health_score}/100
-            <br />
-            Alerts: {f.active_alerts}
-            <br />
-            <button
-              className="text-teal-600 underline text-xs mt-1"
-              onClick={() => navigate(`/facilities/${f.id}`)}
-            >
-              View detail &rarr;
-            </button>
-          </Popup>
-        </CircleMarker>
-      ))}
+      <ClusterLayer markers={markers} />
     </MapContainer>
   )
 }

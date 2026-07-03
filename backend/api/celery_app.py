@@ -58,5 +58,10 @@ celery_app.conf.update(
             "schedule": 3600,  # every hour
             "options": {"queue": "scoring"},
         },
+        "attendance-escalation": {
+            "task": "tasks.scoring_tasks.run_attendance_escalation",
+            "schedule": 3600,  # every hour
+            "options": {"queue": "scoring"},
+        },
     },
 )

@@ -597,3 +597,116 @@ async def get_job_status(
         result=result_payload,
         traceback=traceback_str,
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Epidemiological demand forecasting (Project Pulse Module 2)
+# ═════════════════════════════════════════════════════════════════════════════
+
+_field_plus_demand = require_role(
+    "FIELD_WORKER", "PHC_ADMIN", "DISTRICT_OFFICER", "STATE_ADMIN", "SUPERADMIN"
+)
+
+# Disease → affected medicine categories (Indian seasonal epidemiology).
+DISEASE_CATEGORIES: dict[str, list[str]] = {
+    "malaria": ["ANTIMALARIAL"],
+    "dengue": ["OTHER", "ANALGESIC"],            # IV fluids + paracetamol
+    "chikungunya": ["ANALGESIC"],
+    "acute diarrheal disease": ["ORS", "OTHER"],
+    "cholera": ["ORS", "OTHER"],
+    "typhoid": ["ANTIBIOTIC"],
+    "acute respiratory infection": ["ANTIBIOTIC", "ANALGESIC"],
+    "influenza": ["ANALGESIC", "ANTIBIOTIC"],
+    "measles": ["VACCINE"],
+}
+DEMAND_MULTIPLIER = {"low": 1.15, "moderate": 1.35, "high": 1.6, "outbreak": 2.0}
+
+
+class DemandForecastItem(BaseModel):
+    disease: str
+    severity: str
+    medicine_category: str
+    affected_medicines: list[str]
+    demand_multiplier: float
+    reasoning: str
+
+
+@router.get(
+    "/demand/{facility_id}",
+    response_model=list[DemandForecastItem],
+    summary="Epidemiological demand forecast for a facility",
+)
+async def demand_forecast(
+    facility_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_field_plus_demand),
+) -> list[DemandForecastItem]:
+    """Cross-reference active disease outbreaks in the facility's district with
+    the medicine catalogue to forecast category-level demand spikes (e.g. a
+    malaria outbreak → antimalarial demand +60%)."""
+    today = date.today()
+
+    district_id = (
+        await db.execute(
+            sa_text("SELECT district_id FROM facilities WHERE id = :fid"),
+            {"fid": str(facility_id)},
+        )
+    ).scalar_one_or_none()
+    if district_id is None:
+        return []
+
+    events = (
+        await db.execute(
+            sa_text(
+                """
+                SELECT disease_name, severity
+                FROM disease_events
+                WHERE district_id = :did
+                  AND start_date <= :today
+                  AND (end_date IS NULL OR end_date >= :today)
+                ORDER BY start_date DESC
+                """
+            ),
+            {"did": district_id, "today": today},
+        )
+    ).fetchall()
+    if not events:
+        return []
+
+    # Medicines grouped by category (active only).
+    med_rows = (
+        await db.execute(
+            sa_text("SELECT category, name FROM medicines WHERE is_active = TRUE")
+        )
+    ).fetchall()
+    by_category: dict[str, list[str]] = {}
+    for r in med_rows:
+        by_category.setdefault(r.category, []).append(r.name)
+
+    # Build forecast items; dedupe by (disease, category) keeping the strongest.
+    seen: dict[tuple[str, str], DemandForecastItem] = {}
+    for ev in events:
+        categories = DISEASE_CATEGORIES.get((ev.disease_name or "").lower(), [])
+        mult = DEMAND_MULTIPLIER.get((ev.severity or "low").lower(), 1.15)
+        for cat in categories:
+            meds = by_category.get(cat, [])
+            if not meds:
+                continue
+            pct = round((mult - 1.0) * 100)
+            item = DemandForecastItem(
+                disease=ev.disease_name,
+                severity=ev.severity or "low",
+                medicine_category=cat,
+                affected_medicines=meds,
+                demand_multiplier=mult,
+                reasoning=(
+                    f"{ev.disease_name} ({ev.severity}) active in-district — "
+                    f"expect ~{pct}% higher demand for {cat.title()} "
+                    f"({', '.join(meds[:3])}{'…' if len(meds) > 3 else ''})."
+                ),
+            )
+            key = (ev.disease_name, cat)
+            if key not in seen or mult > seen[key].demand_multiplier:
+                seen[key] = item
+
+    return sorted(seen.values(), key=lambda x: x.demand_multiplier, reverse=True)

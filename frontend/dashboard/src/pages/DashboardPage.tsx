@@ -1,7 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { getFacilities } from '../api/facilities'
+import { getFacilities, getFacilityStats, getFacilitiesMap, getAtRiskFacilities } from '../api/facilities'
 import { getAlerts } from '../api/alerts'
 import FacilityMap from '../components/FacilityMap'
+import NationalBeds from '../components/NationalBeds'
+import NearestFacilities from '../components/NearestFacilities'
 import AlertCard from '../components/AlertCard'
 import { useAlertWebSocket } from '../hooks/useWebSocket'
 import { useTranslation } from 'react-i18next'
@@ -17,16 +19,47 @@ export default function DashboardPage() {
   })
 
   const { data: alertsData, isLoading: alertsLoading } = useQuery({
-    queryKey: ['alerts', 'PENDING'],
-    queryFn: () => getAlerts({ status: 'PENDING' }),
+    queryKey: ['alerts', 'OPEN'],
+    queryFn: () => getAlerts({ status: 'OPEN' }),
     refetchInterval: 30_000,
   })
 
+  // Critical count needs the server-side total, not the current page of items.
+  const { data: criticalData } = useQuery({
+    queryKey: ['alerts', 'OPEN', 'CRITICAL'],
+    queryFn: () => getAlerts({ status: 'OPEN', severity: 'CRITICAL' }),
+    refetchInterval: 30_000,
+  })
+
+  // Facility totals across ALL facilities in scope (not just the fetched map page).
+  const { data: stats } = useQuery({
+    queryKey: ['facility-stats'],
+    queryFn: getFacilityStats,
+    refetchInterval: 60_000,
+  })
+
+  // Lightweight markers for EVERY facility in scope — clustered on the map.
+  const { data: mapMarkers = [] } = useQuery({
+    queryKey: ['facilities-map'],
+    queryFn: getFacilitiesMap,
+  })
+
+  // True national bottom-5 (lowest health score across all facilities in scope).
+  const { data: atRisk = [], isLoading: atRiskLoading } = useQuery({
+    queryKey: ['at-risk'],
+    queryFn: () => getAtRiskFacilities(5),
+    refetchInterval: 60_000,
+  })
+
   const alerts = alertsData?.items ?? []
-  const criticalCount = alerts.filter((a) => a.severity === 'CRITICAL').length
-  const avgScore = facilities.length
-    ? Math.round(facilities.reduce((s, f) => s + f.health_score, 0) / facilities.length)
-    : 0
+  const activeCount = alertsData?.total ?? 0        // total open, not just this page
+  const criticalCount = criticalData?.total ?? 0
+  const facilityCount = stats?.total ?? facilities.length
+  const avgScore = stats?.avg_score != null
+    ? Math.round(stats.avg_score)
+    : facilities.length
+      ? Math.round(facilities.reduce((s, f) => s + f.health_score, 0) / facilities.length)
+      : 0
 
   const scoreColor = (score: number) =>
     score >= 70 ? 'text-green-700' : score >= 45 ? 'text-yellow-700' : 'text-red-700'
@@ -38,8 +71,8 @@ export default function DashboardPage() {
         {[
           {
             label: t('kpi.active_alerts'),
-            value: alerts.length,
-            color: alerts.length > 0 ? 'text-red-700' : 'text-green-700',
+            value: activeCount,
+            color: activeCount > 0 ? 'text-red-700' : 'text-green-700',
           },
           {
             label: t('kpi.critical'),
@@ -53,7 +86,7 @@ export default function DashboardPage() {
           },
           {
             label: t('kpi.facilities'),
-            value: facilities.length,
+            value: facilityCount.toLocaleString(),
             color: 'text-teal-700',
           },
         ].map((kpi) => (
@@ -71,7 +104,7 @@ export default function DashboardPage() {
           {facilitiesLoading ? (
             <div className="h-96 flex items-center justify-center text-gray-400">Loading map...</div>
           ) : (
-            <FacilityMap facilities={facilities} />
+            <FacilityMap markers={mapMarkers} />
           )}
           <div className="flex gap-4 mt-3 text-xs text-gray-500">
             <span className="flex items-center gap-1">
@@ -102,7 +135,7 @@ export default function DashboardPage() {
           {alerts
             .slice()
             .sort((a, b) => {
-              const order: Record<string, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 }
+              const order: Record<string, number> = { CRITICAL: 0, WARNING: 1, INFO: 2 }
               return (order[a.severity] ?? 4) - (order[b.severity] ?? 4)
             })
             .map((alert) => (
@@ -114,7 +147,7 @@ export default function DashboardPage() {
       {/* Bottom-5 facilities */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <h2 className="font-semibold text-gray-800 mb-3">{t('dashboard.bottom_facilities')}</h2>
-        {facilitiesLoading ? (
+        {atRiskLoading ? (
           <p className="text-gray-400 text-sm">Loading...</p>
         ) : (
           <div className="overflow-x-auto">
@@ -129,15 +162,13 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {[...facilities]
-                  .sort((a, b) => a.health_score - b.health_score)
-                  .slice(0, 5)
+                {atRisk
                   .map((f) => (
                     <tr key={f.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors">
                       <td className="py-2.5 pr-4 font-medium text-gray-900">{f.name}</td>
                       <td className="py-2.5 pr-4 text-gray-500">{f.facility_type}</td>
                       <td className="py-2.5 pr-4">
-                        <span className={`font-bold ${scoreColor(f.health_score)}`}>
+                        <span className={`font-bold ${scoreColor(f.health_score ?? 0)}`}>
                           {f.health_score}
                         </span>
                         <span className="text-gray-400 text-xs">/100</span>
@@ -167,6 +198,12 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Find nearest PHCs/CHCs (Google Maps / GPS) */}
+      <NearestFacilities />
+
+      {/* National / State-UT bed infrastructure (real data.gov.in) */}
+      <NationalBeds />
     </div>
   )
 }

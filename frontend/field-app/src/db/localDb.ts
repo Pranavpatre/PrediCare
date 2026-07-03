@@ -32,6 +32,18 @@ interface PendingAttendance {
   synced: boolean
 }
 
+// Generic offline outbox for ledger writes (footfall tally / beds / tests).
+// Each row is PUT to its /ledger endpoint when online.
+interface PendingLedger {
+  id?: number
+  kind: 'footfall' | 'beds' | 'tests'
+  facility_id: string
+  payload: unknown            // request body for the /ledger/<kind> PUT
+  recorded_at: string
+  client_id: string
+  synced: boolean
+}
+
 interface CachedMedicine {
   id: number
   name: string
@@ -51,6 +63,7 @@ class SmartHealthDB extends Dexie {
   pendingStockUpdates!: EntityTable<PendingStockUpdate, 'id'>
   pendingFootfall!: EntityTable<PendingFootfall, 'id'>
   pendingAttendance!: EntityTable<PendingAttendance, 'id'>
+  pendingLedger!: EntityTable<PendingLedger, 'id'>
   medicines!: EntityTable<CachedMedicine, 'id'>
   notifications!: EntityTable<CachedNotification, 'id'>
 
@@ -63,8 +76,12 @@ class SmartHealthDB extends Dexie {
       medicines: 'id',
       notifications: 'id, read',
     })
+    // v2 adds the generic ledger outbox (footfall tally / beds / tests).
+    this.version(2).stores({
+      pendingLedger: '++id, kind, facility_id, synced',
+    })
   }
 }
 
 export const db = new SmartHealthDB()
-export type { PendingStockUpdate, PendingFootfall, PendingAttendance, CachedMedicine }
+export type { PendingStockUpdate, PendingFootfall, PendingAttendance, PendingLedger, CachedMedicine }

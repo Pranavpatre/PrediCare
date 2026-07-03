@@ -1,14 +1,13 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { getFacility, type StockItem } from '../api/facilities'
+import { getFacility, getFacilityAttendance, getFacilityBeds, getFacilityTests, getDemandForecast, type StockItem } from '../api/facilities'
 import type { Alert } from '../api/alerts'
 import { formatDistanceToNow } from 'date-fns'
 
 const SEVERITY_BADGE: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  MEDIUM: 'bg-yellow-100 text-yellow-800',
-  LOW: 'bg-blue-100 text-blue-800',
+  WARNING: 'bg-orange-100 text-orange-800',
+  INFO: 'bg-blue-100 text-blue-800',
 }
 
 function HealthScoreGauge({ score }: { score: number }) {
@@ -56,6 +55,30 @@ export default function FacilityDetailPage() {
     enabled: !!id,
   })
 
+  const { data: attendance } = useQuery({
+    queryKey: ['facility-attendance', id],
+    queryFn: () => getFacilityAttendance(id!),
+    enabled: !!id,
+  })
+
+  const { data: bedMatrix } = useQuery({
+    queryKey: ['facility-beds', id],
+    queryFn: () => getFacilityBeds(id!),
+    enabled: !!id,
+  })
+
+  const { data: testChecklist } = useQuery({
+    queryKey: ['facility-tests', id],
+    queryFn: () => getFacilityTests(id!),
+    enabled: !!id,
+  })
+
+  const { data: demandForecast = [] } = useQuery({
+    queryKey: ['facility-demand', id],
+    queryFn: () => getDemandForecast(id!),
+    enabled: !!id,
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-400">
@@ -75,7 +98,14 @@ export default function FacilityDetailPage() {
     )
   }
 
-  const breakdown = facility.health_score_breakdown ?? {}
+  // Only show numeric per-dimension scores (backend also sends time/status/overall).
+  const breakdown = Object.fromEntries(
+    Object.entries(facility.health_score_breakdown ?? {}).filter(
+      ([k, v]) => k.endsWith('_score') && k !== 'overall_score' && typeof v === 'number',
+    ),
+  )
+  const stockSummary = facility.stock_summary ?? []
+  const hasCoords = facility.lat != null && facility.lng != null
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -105,7 +135,7 @@ export default function FacilityDetailPage() {
             { label: 'Bed Capacity', value: facility.bed_capacity ?? '—' },
             { label: 'Active Alerts', value: facility.active_alerts },
             { label: 'Facility Type', value: facility.facility_type },
-            { label: 'Coordinates', value: `${facility.lat.toFixed(4)}, ${facility.lng.toFixed(4)}` },
+            { label: 'Coordinates', value: hasCoords ? `${facility.lat!.toFixed(4)}, ${facility.lng!.toFixed(4)}` : '—' },
           ].map((stat) => (
             <div key={stat.label} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
               <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{stat.label}</p>
@@ -130,10 +160,129 @@ export default function FacilityDetailPage() {
         </div>
       )}
 
+      {/* Staff attendance (geofenced) */}
+      {attendance && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">Staff Attendance (Geofenced)</h2>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="text-center">
+              <p className="text-xs text-gray-500">On-site today</p>
+              <p className="text-2xl font-bold text-teal-700 mt-1">{attendance.present_today}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-500">Total check-ins today</p>
+              <p className="text-2xl font-bold text-gray-700 mt-1">{attendance.total_today}</p>
+            </div>
+            <div className="text-center">
+              <p className="text-xs text-gray-500">Days since on-site</p>
+              <p className={`text-2xl font-bold mt-1 ${
+                (attendance.days_since_last_present ?? 0) >= 3 ? 'text-red-700' : 'text-green-700'
+              }`}>
+                {attendance.days_since_last_present ?? '—'}
+              </p>
+            </div>
+          </div>
+          {(attendance.days_since_last_present ?? 0) >= 3 && (
+            <p className="mt-3 text-sm text-red-700 font-medium">
+              ⚠ Zero on-site attendance for {attendance.days_since_last_present}+ days — escalated.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Epidemiological demand forecast */}
+      {demandForecast.length > 0 && (
+        <div className="bg-amber-50 rounded-xl border border-amber-200 p-4">
+          <h2 className="font-semibold text-amber-900 mb-1">
+            🦟 Seasonal Demand Forecast
+          </h2>
+          <p className="text-xs text-amber-700 mb-3">
+            Active outbreaks in this district are expected to spike demand for these categories.
+          </p>
+          <div className="space-y-2">
+            {demandForecast.map((f, i) => (
+              <div key={i} className="flex items-start gap-3 bg-white/60 rounded-lg p-2.5 border border-amber-100">
+                <span className="text-sm font-bold text-amber-800 whitespace-nowrap">
+                  +{Math.round((f.demand_multiplier - 1) * 100)}%
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-gray-900">
+                    {f.medicine_category} — {f.disease} <span className="text-xs text-gray-500">({f.severity})</span>
+                  </p>
+                  <p className="text-xs text-gray-500">{f.affected_medicines.join(', ')}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Real district footfall (HMIS) */}
+      {facility.real_district_opd_annual != null && (
+        <div className="bg-teal-50 rounded-xl border border-teal-200 p-4">
+          <p className="text-xs font-medium text-teal-700 uppercase tracking-wide">
+            Real district OPD — HMIS {facility.real_district_opd_period} (data.gov.in)
+          </p>
+          <p className="text-2xl font-bold text-teal-900 mt-1">
+            {facility.real_district_opd_annual.toLocaleString()} <span className="text-sm font-normal text-teal-700">outpatient visits/yr · {facility.district_name} district</span>
+          </p>
+        </div>
+      )}
+
+      {/* Bed Matrix */}
+      {bedMatrix && bedMatrix.beds.some((b) => b.total_beds > 0) && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">Bed Matrix</h2>
+          <div className="grid grid-cols-3 gap-4">
+            {bedMatrix.beds.map((b) => {
+              const occ = b.total_beds > 0 ? b.occupied_beds / b.total_beds : 0
+              return (
+                <div key={b.bed_type} className="border border-gray-100 rounded-lg p-3 text-center">
+                  <p className="text-xs font-medium text-gray-500 uppercase">{b.bed_type}</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">
+                    {b.occupied_beds}<span className="text-base text-gray-400">/{b.total_beds}</span>
+                  </p>
+                  <p className={`text-xs font-medium mt-1 ${occ >= 0.9 ? 'text-red-600' : occ >= 0.7 ? 'text-yellow-600' : 'text-green-600'}`}>
+                    {b.total_beds > 0 ? `${Math.round(occ * 100)}% occupied` : 'n/a'}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Test Availability */}
+      {testChecklist && testChecklist.tests.length > 0 && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
+          <h2 className="font-semibold text-gray-800 mb-3">
+            Diagnostic Test Availability
+            {testChecklist.tests.some((t) => !t.available) && (
+              <span className="ml-2 text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded-full">
+                {testChecklist.tests.filter((t) => !t.available).length} unavailable
+              </span>
+            )}
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {testChecklist.tests.map((t) => (
+              <span
+                key={t.test_id}
+                className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                  t.available ? 'bg-green-50 text-green-700 border border-green-200'
+                              : 'bg-red-50 text-red-700 border border-red-200'
+                }`}
+              >
+                {t.available ? '✓' : '✗'} {t.test_name}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Stock table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
         <h2 className="font-semibold text-gray-800 mb-3">Stock Summary</h2>
-        {facility.stock_summary.length === 0 ? (
+        {stockSummary.length === 0 ? (
           <p className="text-gray-400 text-sm">No stock data available.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -148,7 +297,7 @@ export default function FacilityDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {facility.stock_summary.map((item: StockItem) => (
+                {stockSummary.map((item: StockItem) => (
                   <tr key={item.medicine_id} className="hover:bg-gray-50">
                     <td className="px-3 py-2.5 font-medium text-gray-900">{item.medicine_name}</td>
                     <td className="px-3 py-2.5 text-gray-700">{item.total_stock.toLocaleString()}</td>
@@ -190,7 +339,7 @@ export default function FacilityDetailPage() {
                 </div>
                 <div className="text-right shrink-0">
                   <span className={`text-xs font-medium ${
-                    alert.status === 'PENDING' ? 'text-orange-600' :
+                    alert.status === 'OPEN' ? 'text-orange-600' :
                     alert.status === 'RESOLVED' ? 'text-green-600' : 'text-gray-500'
                   }`}>
                     {alert.status}

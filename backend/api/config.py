@@ -35,8 +35,23 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = "default_verify_token"
     whatsapp_api_version: str = "v19.0"
 
+    # Smart redistribution: only propose transfers within this radius (Project Pulse)
+    redistribution_max_km: float = 15.0
+
+    # Geofenced staff attendance (Project Pulse Module 1)
+    geofence_radius_m: float = 200.0          # metres; check-in within = present
+    # Consecutive days of zero attendance before the dashboard escalates.
+    attendance_escalation_days: int = 3
+
     # Gemini
     gemini_api_key: str = ""
+
+    # data.gov.in — real Indian public-health open data (state-level infra).
+    # Sample key returns max 10 records; supply a personal key for full pulls.
+    data_gov_api_key: str = "579b464db66ec23bdd000001cdd3946e44ce4aad7209ff7b23ac571b"
+    data_gov_base_url: str = "https://api.data.gov.in/resource"
+    # "State/UT-wise Number of Beds at PHC, CHC, SDH, DH and Medical Colleges (2023)"
+    data_gov_state_beds_resource_id: str = "d133eac1-143f-4c1d-bdc4-b9dfd73ab78c"
 
     # Dev-only login bypass: in non-production, this OTP is always accepted for
     # any existing active user (SMS/WhatsApp delivery is not wired up locally).

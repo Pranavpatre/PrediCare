@@ -384,8 +384,9 @@ async def create_plan(
             detail="No valid facility-stock combinations found to optimise",
         )
 
-    # 6. Run solver
-    solver = RedistributionSolver()
+    # 6. Run solver (only propose transfers within the configured radius)
+    from config import get_settings
+    solver = RedistributionSolver(max_distance_km=get_settings().redistribution_max_km)
     plan_result = solver.solve(facility_stocks)
 
     # 7. Persist plan

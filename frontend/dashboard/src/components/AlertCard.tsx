@@ -12,9 +12,8 @@ const SEVERITY_COLOR: Record<string, string> = {
 
 const SEVERITY_BADGE: Record<string, string> = {
   CRITICAL: 'bg-red-100 text-red-800',
-  HIGH: 'bg-orange-100 text-orange-800',
-  MEDIUM: 'bg-yellow-100 text-yellow-800',
-  LOW: 'bg-blue-100 text-blue-800',
+  WARNING: 'bg-orange-100 text-orange-800',
+  INFO: 'bg-blue-100 text-blue-800',
 }
 
 interface Props {
@@ -64,7 +63,7 @@ export default function AlertCard({ alert, planId }: Props) {
           )}
         </div>
       </div>
-      {alert.status === 'PENDING' && (
+      {alert.status === 'OPEN' && (
         <div className="flex gap-2 mt-3">
           {planId && (
             <button
@@ -94,7 +93,7 @@ export default function AlertCard({ alert, planId }: Props) {
           )}
         </div>
       )}
-      {alert.status !== 'PENDING' && (
+      {alert.status !== 'OPEN' && (
         <span className="inline-block mt-2 text-xs text-green-700 font-medium">{alert.status}</span>
       )}
     </div>
