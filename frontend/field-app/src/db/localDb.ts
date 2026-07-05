@@ -49,12 +49,15 @@ interface CachedMedicine {
   name: string
   reorder_level: number
   unit: string
+  category: string
 }
 
 interface CachedNotification {
   id: string
-  title: string
+  channel: string
   body: string
+  template_key?: string | null
+  template_params?: Record<string, string | number> | null
   created_at: string
   read: boolean
 }
@@ -79,6 +82,16 @@ class SmartHealthDB extends Dexie {
     // v2 adds the generic ledger outbox (footfall tally / beds / tests).
     this.version(2).stores({
       pendingLedger: '++id, kind, facility_id, synced',
+    })
+    // v3 indexes created_at — NotificationsPage calls orderBy('created_at'),
+    // which Dexie throws on for a non-indexed field, leaving the page stuck
+    // on its loading state forever since the error was never caught.
+    this.version(3).stores({
+      notifications: 'id, read, created_at',
+    })
+    // v4 indexes category so the stock page can group medicines by it.
+    this.version(4).stores({
+      medicines: 'id, category',
     })
   }
 }

@@ -286,7 +286,7 @@ async def _persist_prediction(
                  model_version, predicted_at)
             VALUES
                 (:id, :facility_id, :medicine_id, 'STOCKOUT', :horizon_days,
-                 :predicted_value, :confidence, :reasoning::jsonb,
+                 :predicted_value, :confidence, CAST(:reasoning AS jsonb),
                  :recommendation, :model_version, NOW())
             """
         ),

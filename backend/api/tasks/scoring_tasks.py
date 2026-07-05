@@ -14,12 +14,13 @@ Table alignment notes (001_core.sql):
 
 from __future__ import annotations
 
-import logging
 import os
+
+import structlog
 
 from celery_app import celery_app
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 def _sync_db_url() -> str:
@@ -175,6 +176,24 @@ def run_health_scores(self) -> dict:
                     "GREEN" if overall_score >= 70
                     else ("YELLOW" if overall_score >= 45 else "RED")
                 )
+
+                # ── Critical-alert override ──────────────────────────────────
+                # The composite score averages across all medicines/diagnostics,
+                # so a single critical shortage (e.g. one stocked-out medicine
+                # among many well-stocked ones) can get diluted and never pull
+                # the facility below the GREEN/YELLOW threshold. Any facility
+                # with an OPEN CRITICAL alert must show RED regardless of the
+                # averaged score — one critical stockout is enough to flag it.
+                cur.execute(
+                    """
+                    SELECT 1 FROM alerts
+                    WHERE facility_id = %s AND status = 'OPEN' AND severity = 'CRITICAL'
+                    LIMIT 1
+                    """,
+                    (fac_id,),
+                )
+                if cur.fetchone():
+                    status = "RED"
 
                 # ── Persist (TimescaleDB hypertable — must supply `time`) ────
                 cur.execute(

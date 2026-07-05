@@ -68,6 +68,7 @@ services:
     volumes:
       - ml_artefacts:/app/ml-models/artefacts
       - ../../backend/ml-models:/app/ml-models
+      - ../../backend/integrations:/app/integrations
 
   celery-worker:
     build:
@@ -91,6 +92,7 @@ services:
     volumes:
       - ml_artefacts:/app/ml-models/artefacts
       - ../../backend/ml-models:/app/ml-models
+      - ../../backend/integrations:/app/integrations
 
   celery-beat:
     build:
@@ -111,6 +113,7 @@ services:
     volumes:
       - ml_artefacts:/app/ml-models/artefacts
       - ../../backend/ml-models:/app/ml-models
+      - ../../backend/integrations:/app/integrations
 
   dashboard:
     build:

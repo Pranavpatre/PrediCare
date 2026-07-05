@@ -15,9 +15,10 @@ Table alignment notes (001_core.sql):
 from __future__ import annotations
 
 import json
-import logging
 import os
 import sys
+
+import structlog
 
 from celery_app import celery_app
 
@@ -28,7 +29,7 @@ _ML_BASE = os.environ.get("ML_MODELS_DIR", "/app/ml-models")
 sys.path.insert(0, os.path.join(_ML_BASE, "stockout"))
 sys.path.insert(0, os.path.join(_ML_BASE, "diagnostics"))
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------

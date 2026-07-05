@@ -288,7 +288,9 @@ CREATE TABLE notifications (
     user_id         UUID NOT NULL REFERENCES users(id),
     channel         VARCHAR(20) NOT NULL,   -- whatsapp | sms | push | in_app
     language        VARCHAR(10) NOT NULL,
-    message         TEXT NOT NULL,
+    message         TEXT NOT NULL,          -- localized-at-send-time fallback for clients without a template
+    template_key    VARCHAR(64),            -- e.g. 'dispatchInstruction' — lets the client re-render via i18n
+    template_params JSONB,                  -- interpolation values for template_key
     sent_at         TIMESTAMPTZ,
     delivered_at    TIMESTAMPTZ,
     response        VARCHAR(20),            -- YES | NO | DEFER (for WhatsApp actions)

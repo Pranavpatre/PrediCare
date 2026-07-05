@@ -69,6 +69,10 @@ class Notification(Base):
     # BCP-47 language code
     language: Mapped[str] = mapped_column(String(10), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
+    # Lets the client re-render the body via i18n in whatever language is
+    # currently selected, instead of being stuck with `message`'s language.
+    template_key: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    template_params: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     delivered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # YES | NO | DEFER for WhatsApp action responses

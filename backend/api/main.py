@@ -13,7 +13,7 @@ from slowapi.util import get_remote_address
 
 from config import get_settings
 from db import engine, Base
-from routers import alerts, assistant, attendance, ledger, auth, facilities, health_scores, overview, predict, redistribution, sync, webhooks
+from routers import alerts, assistant, attendance, ledger, auth, facilities, health_scores, medicines, notifications, overview, predict, redistribution, sync, webhooks
 from services.websocket_manager import WebSocketManager
 
 settings = get_settings()
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
-    title="SmartHealth API",
+    title="PrediCare API",
     description="District Health Operating System — AI-powered PHC/CHC management",
     version="1.0.0",
     docs_url="/docs" if not settings.is_production else None,
@@ -106,3 +106,5 @@ app.include_router(assistant.router, prefix="/api/v1", tags=["assistant"])
 app.include_router(overview.router, prefix="/api/v1", tags=["overview"])
 app.include_router(attendance.router, prefix="/api/v1", tags=["attendance"])
 app.include_router(ledger.router, prefix="/api/v1", tags=["ledger"])
+app.include_router(medicines.router, prefix="/api/v1", tags=["medicines"])
+app.include_router(notifications.router, prefix="/api/v1", tags=["notifications"])

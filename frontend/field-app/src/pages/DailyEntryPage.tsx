@@ -3,8 +3,10 @@ import { useTranslation } from 'react-i18next'
 import { format } from 'date-fns'
 import { db } from '../db/localDb'
 import { useAuthStore } from '../stores/authStore'
-import { useVoiceInput, parseSpokenNumber } from '../hooks/useVoiceInput'
+import { useVoiceInput, parseSpokenNumber, VOICE_LANG_MAP } from '../hooks/useVoiceInput'
 import { syncPendingData, queueLedger } from '../sync/syncService'
+import InfoNote from '../components/InfoNote'
+import VoiceRecordingBanner from '../components/VoiceRecordingBanner'
 import clsx from 'clsx'
 
 function generateClientId() {
@@ -13,7 +15,7 @@ function generateClientId() {
 
 export default function DailyEntryPage() {
   const { t } = useTranslation()
-  const { facilityId, userId, token } = useAuthStore()
+  const { facilityId, userId, token, languagePref } = useAuthStore()
   const today = format(new Date(), 'yyyy-MM-dd')
 
   // Geofenced check-in state
@@ -47,6 +49,10 @@ export default function DailyEntryPage() {
       .then((r) => r.ok ? r.json() : null).then((d) => d && setBeds(d.beds)).catch(() => {})
     fetch(`${API}/api/v1/ledger/tests/${facilityId}`, { headers: authHdr })
       .then((r) => r.ok ? r.json() : null).then((d) => d && setTests(d.tests)).catch(() => {})
+    fetch(`${API}/api/v1/ledger/footfall/${facilityId}`, { headers: authHdr })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => d && setTally({ general: d.general, maternal: d.maternal, emergency: d.emergency }))
+      .catch(() => {})
   }, [facilityId, token])
 
   const setOccupied = (bedType: string, delta: number) =>
@@ -75,8 +81,10 @@ export default function DailyEntryPage() {
   const [footfallSaved, setFootfallSaved] = useState(false)
   const [footfallError, setFootfallError] = useState<string | null>(null)
 
-  // Doctor attendance state
-  const [doctorPresent, setDoctorPresent] = useState<boolean>(true)
+  // Doctor attendance state — starts unset (neither button highlighted) so
+  // the UI never implies attendance was recorded before the worker actually
+  // taps something.
+  const [doctorPresent, setDoctorPresent] = useState<boolean | null>(null)
   const [attendanceSaved, setAttendanceSaved] = useState(false)
 
   // Pending count
@@ -87,7 +95,7 @@ export default function DailyEntryPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const { isListening, transcript, error: voiceError, startListening, stopListening, reset: resetVoice } =
-    useVoiceInput('hi-IN')
+    useVoiceInput(VOICE_LANG_MAP[languagePref] || 'en-IN')
 
   // Parse voice transcript into patient count
   useEffect(() => {
@@ -97,7 +105,7 @@ export default function DailyEntryPage() {
       setPatientCount(String(parsed))
       setFootfallError(null)
     } else {
-      setFootfallError(`Could not parse "${transcript}" as a number`)
+      setFootfallError(t('patient.errorParse', { transcript }))
     }
     resetVoice()
   }, [transcript, resetVoice])
@@ -118,7 +126,7 @@ export default function DailyEntryPage() {
     if (!facilityId || !userId) return
     const count = parseInt(patientCount, 10)
     if (isNaN(count) || count < 0) {
-      setFootfallError('Enter a valid patient count')
+      setFootfallError(t('patient.errorInvalid'))
       return
     }
     setFootfallError(null)
@@ -133,6 +141,10 @@ export default function DailyEntryPage() {
     setFootfallSaved(true)
     setTimeout(() => setFootfallSaved(false), 3000)
     setPatientCount('')
+    // Offline-first: always queue locally, then flush immediately if online —
+    // same contract as queueLedger (beds/tests/tally), so this doesn't sit as
+    // "pending" until a manual Sync Now tap like the rest of the screen.
+    if (navigator.onLine) await syncPendingData()
     refreshPending()
   }
 
@@ -150,6 +162,7 @@ export default function DailyEntryPage() {
     })
     setAttendanceSaved(true)
     setTimeout(() => setAttendanceSaved(false), 3000)
+    if (navigator.onLine) await syncPendingData()
     refreshPending()
   }
 
@@ -157,11 +170,11 @@ export default function DailyEntryPage() {
     setCheckInError(null)
     setCheckInStatus(null)
     if (!navigator.geolocation) {
-      setCheckInError('Geolocation is not available on this device')
+      setCheckInError(t('checkin.errorGeoUnavailable'))
       return
     }
     if (!navigator.onLine) {
-      setCheckInError('Geofenced check-in needs a network connection')
+      setCheckInError(t('checkin.errorNeedsNetwork'))
       return
     }
     setCheckingIn(true)
@@ -178,17 +191,17 @@ export default function DailyEntryPage() {
               facility_id: facilityId,
             }),
           })
-          if (!res.ok) throw new Error(`Check-in failed (HTTP ${res.status})`)
+          if (!res.ok) throw new Error(t('checkin.errorFailed'))
           const data = await res.json()
           setCheckInStatus({ within: data.within_geofence, distance: Math.round(data.distance_m ?? 0) })
         } catch (e) {
-          setCheckInError(e instanceof Error ? e.message : 'Check-in failed')
+          setCheckInError(e instanceof Error ? e.message : t('checkin.errorFailed'))
         } finally {
           setCheckingIn(false)
         }
       },
       (err) => {
-        setCheckInError(err.message || 'Could not get your location')
+        setCheckInError(err.message || t('checkin.errorNoLocation'))
         setCheckingIn(false)
       },
       { enableHighAccuracy: true, timeout: 10000 },
@@ -197,36 +210,46 @@ export default function DailyEntryPage() {
 
   const handleSync = async () => {
     if (!navigator.onLine) {
-      setSyncMsg('No internet connection')
+      setSyncMsg(t('sync.noInternet'))
       setTimeout(() => setSyncMsg(null), 3000)
       return
     }
     setSyncing(true)
     const result = await syncPendingData()
     setSyncing(false)
-    setSyncMsg(`Synced ${result.synced} record(s)${result.errors > 0 ? `, ${result.errors} failed` : ''}`)
+    setSyncMsg(
+      t('sync.result', {
+        synced: result.synced,
+        errorsSuffix: result.errors > 0 ? `, ${result.errors} failed` : '',
+      }),
+    )
     setTimeout(() => setSyncMsg(null), 4000)
     refreshPending()
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 space-y-6 max-w-lg mx-auto">
+    <div className="min-h-screen bg-gray-50 flex flex-col w-full max-w-6xl mx-auto">
+      <VoiceRecordingBanner show={isListening} label={t('voice.recording')} />
       {/* Header */}
-      <div className="flex items-center justify-between pt-2">
-        <h1 className="text-xl font-bold text-teal-600">Daily Entry</h1>
+      <div className="flex items-center justify-between px-4 pt-4">
+        <h1 className="text-xl font-bold text-teal-600">{t('daily.title')}</h1>
         <div className="flex items-center gap-2">
           {pendingCount > 0 && (
             <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-              {pendingCount} pending
+              {pendingCount} {t('daily.pending')}
             </span>
           )}
           <span className="text-sm text-gray-500">{format(new Date(), 'dd MMM yyyy')}</span>
         </div>
       </div>
 
-      {/* Patient Count Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+      {/* All sections are visible at once, spread across the page in a grid
+          instead of stacked in one narrow centered column — reduces total
+          scroll on wide screens and keeps related actions spatially grouped. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 pb-20 items-start">
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-span-2 lg:row-start-1">
         <h2 className="text-base font-semibold text-gray-800">{t('patient.title')}</h2>
+        <InfoNote>{t('info.patient')}</InfoNote>
 
         <div className="flex gap-3 items-center">
           <input
@@ -256,7 +279,7 @@ export default function DailyEntryPage() {
         {voiceError && <p className="text-sm text-red-500">{voiceError}</p>}
         {footfallError && <p className="text-sm text-red-500">{footfallError}</p>}
         {isListening && (
-          <p className="text-sm text-blue-500 animate-pulse">Listening… speak the count</p>
+          <p className="text-sm text-blue-500 animate-pulse">{t('patient.listening')}</p>
         )}
 
         <button
@@ -269,8 +292,9 @@ export default function DailyEntryPage() {
       </section>
 
       {/* Rapid Footfall Tally */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-1 lg:row-start-2">
         <h2 className="text-base font-semibold text-gray-800">{t('footfall.title')}</h2>
+        <InfoNote>{t('info.footfall')}</InfoNote>
         {([
           ['general', t('footfall.general')],
           ['maternal', t('footfall.maternal')],
@@ -293,8 +317,8 @@ export default function DailyEntryPage() {
         </button>
       </section>
 
-      {/* Geofenced Check-In Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+      {/* Geofenced Check-In Section — placed top-right on wide screens */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-3 lg:row-start-1">
         <h2 className="text-base font-semibold text-gray-800">{t('checkin.title')}</h2>
         <p className="text-xs text-gray-500 -mt-2">{t('checkin.hint')}</p>
         <button
@@ -314,49 +338,18 @@ export default function DailyEntryPage() {
             )}
           >
             {checkInStatus.within
-              ? `✓ Checked in on-site (${checkInStatus.distance} m from facility)`
-              : `⚠ Outside geofence — ${checkInStatus.distance} m away. Move closer to the facility.`}
+              ? `✓ ${t('checkin.within', { distance: checkInStatus.distance })}`
+              : `⚠ ${t('checkin.outside', { distance: checkInStatus.distance })}`}
           </div>
         )}
         {checkInError && <p className="text-sm text-red-500">{checkInError}</p>}
       </section>
 
-      {/* Doctor Attendance Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
-        <h2 className="text-base font-semibold text-gray-800">{t('attendance.title')}</h2>
-        <div className="flex gap-3">
-          <button
-            onClick={() => handleToggleAttendance(true)}
-            className={clsx(
-              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
-              doctorPresent
-                ? 'bg-green-600 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-            )}
-          >
-            {t('attendance.present')}
-          </button>
-          <button
-            onClick={() => handleToggleAttendance(false)}
-            className={clsx(
-              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
-              !doctorPresent
-                ? 'bg-red-500 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-            )}
-          >
-            {t('attendance.absent')}
-          </button>
-        </div>
-        {attendanceSaved && (
-          <p className="text-sm text-green-600 font-medium">Attendance saved ✓</p>
-        )}
-      </section>
-
       {/* Bed Matrix Section */}
       {beds.length > 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-2 lg:row-start-2">
           <h2 className="text-base font-semibold text-gray-800">{t('beds.title')}</h2>
+          <InfoNote>{t('info.beds')}</InfoNote>
           {beds.map((b) => (
             <div key={b.bed_type} className="flex items-center justify-between">
               <div>
@@ -380,11 +373,50 @@ export default function DailyEntryPage() {
           </button>
         </section>
       )}
+      {beds.length === 0 && (
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center lg:col-start-2 lg:row-start-2">
+          <p className="text-gray-400 text-sm">{t('beds.title')}…</p>
+        </section>
+      )}
+
+      {/* Doctor Attendance Section — after bed matrix, kept toward the right */}
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-3 lg:row-start-2">
+        <h2 className="text-base font-semibold text-gray-800">{t('attendance.title')}</h2>
+        <InfoNote>{t('info.attendance')}</InfoNote>
+        <div className="flex gap-3">
+          <button
+            onClick={() => handleToggleAttendance(true)}
+            className={clsx(
+              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
+              doctorPresent === true
+                ? 'bg-green-600 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+            )}
+          >
+            {t('attendance.present')}
+          </button>
+          <button
+            onClick={() => handleToggleAttendance(false)}
+            className={clsx(
+              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
+              doctorPresent === false
+                ? 'bg-red-500 text-white shadow-sm'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
+            )}
+          >
+            {t('attendance.absent')}
+          </button>
+        </div>
+        {attendanceSaved && (
+          <p className="text-sm text-green-600 font-medium">{t('attendance.saved')}</p>
+        )}
+      </section>
 
       {/* Test Availability Checklist */}
       {tests.length > 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3 lg:col-span-2 lg:row-start-3">
           <h2 className="text-base font-semibold text-gray-800">{t('tests.title')}</h2>
+          <InfoNote>{t('info.tests')}</InfoNote>
           {tests.map((tst) => (
             <div key={tst.test_id} className="flex items-center justify-between">
               <span className="text-sm text-gray-800">{tst.test_name}</span>
@@ -401,18 +433,25 @@ export default function DailyEntryPage() {
           </button>
         </section>
       )}
+      {tests.length === 0 && (
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center lg:col-span-2 lg:row-start-3">
+          <p className="text-gray-400 text-sm">{t('tests.title')}…</p>
+        </section>
+      )}
 
       {/* Sync Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-2 lg:col-start-3 lg:row-start-3">
+        <InfoNote>{t('info.sync')}</InfoNote>
         <button
           onClick={handleSync}
           disabled={syncing || pendingCount === 0}
           className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors"
         >
-          {syncing ? 'Syncing…' : `${t('sync.now')}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
+          {syncing ? t('sync.syncing') : `${t('sync.now')}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
         </button>
         {syncMsg && <p className="text-sm text-gray-600 mt-2 text-center">{syncMsg}</p>}
       </section>
+      </div>
     </div>
   )
 }

@@ -1,23 +1,46 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { formatDistanceToNow } from 'date-fns'
 import { db } from '../db/localDb'
+import { fetchAndCacheNotifications } from '../sync/syncService'
+import InfoNote from '../components/InfoNote'
 
 interface Notification {
   id: string
-  title: string
+  channel: string
   body: string
+  template_key?: string | null
+  template_params?: Record<string, string | number> | null
   created_at: string
   read: boolean
 }
 
+// Renders via i18n (reactively following the worker's currently selected
+// language) when the server sent structured template data; otherwise falls
+// back to the plain `body` text, which is only ever in one fixed language.
+function notificationBody(n: Notification, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  if (n.template_key) return t(`notif.msg.${n.template_key}`, n.template_params ?? {})
+  return n.body
+}
+
 export default function NotificationsPage() {
+  const { t } = useTranslation()
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [loading, setLoading] = useState(true)
 
   const loadNotifications = useCallback(async () => {
-    const items = await db.notifications.orderBy('created_at').reverse().toArray()
-    setNotifications(items)
-    setLoading(false)
+    try {
+      // Same issue as medicines: nothing previously populated the local
+      // cache from the server, so this always read an empty table.
+      await fetchAndCacheNotifications()
+      const items = await db.notifications.orderBy('created_at').reverse().toArray()
+      setNotifications(items)
+    } catch (err) {
+      console.error('[notifications] failed to load:', err)
+      setNotifications([])
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -40,7 +63,7 @@ export default function NotificationsPage() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-gray-400 text-sm">Loading notifications…</p>
+        <p className="text-gray-400 text-sm">{t('notif.loading')}</p>
       </div>
     )
   }
@@ -50,7 +73,7 @@ export default function NotificationsPage() {
       {/* Header */}
       <div className="sticky top-0 bg-white border-b border-gray-100 px-4 py-3 flex items-center justify-between z-10">
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-bold text-teal-600">Notifications</h1>
+          <h1 className="text-xl font-bold text-teal-600">{t('notif.title')}</h1>
           {unreadCount > 0 && (
             <span className="bg-teal-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
               {unreadCount}
@@ -62,19 +85,20 @@ export default function NotificationsPage() {
             onClick={handleMarkAllRead}
             className="text-sm text-teal-600 font-medium hover:underline"
           >
-            Mark all read
+            {t('notif.markAllRead')}
           </button>
         )}
       </div>
 
       {/* List */}
       <div className="p-4 space-y-3">
+        <InfoNote>{t('info.notifications')}</InfoNote>
         {notifications.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 space-y-3">
             <span className="text-5xl" aria-hidden>🔔</span>
-            <p className="text-gray-400 text-sm font-medium">No notifications</p>
+            <p className="text-gray-400 text-sm font-medium">{t('notif.empty')}</p>
             <p className="text-gray-300 text-xs text-center">
-              Transfer alerts and updates will appear here
+              {t('notif.emptyHint')}
             </p>
           </div>
         ) : (
@@ -97,15 +121,15 @@ export default function NotificationsPage() {
                   {!n.read && (
                     <span className="inline-block w-2 h-2 bg-teal-500 rounded-full mr-2 align-middle" />
                   )}
-                  {n.title}
+                  {t(`notif.channel.${n.channel}`, n.channel)}
                 </p>
                 <span className="text-xs text-gray-400 whitespace-nowrap shrink-0">
                   {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
                 </span>
               </div>
-              <p className="text-sm text-gray-500 leading-relaxed pl-4">{n.body}</p>
+              <p className="text-sm text-gray-500 leading-relaxed pl-4">{notificationBody(n, t)}</p>
               {!n.read && (
-                <p className="text-xs text-teal-500 pl-4 font-medium">Tap to mark as read</p>
+                <p className="text-xs text-teal-500 pl-4 font-medium">{t('notif.tapToRead')}</p>
               )}
             </button>
           ))

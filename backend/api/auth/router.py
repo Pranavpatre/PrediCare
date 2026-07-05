@@ -55,12 +55,15 @@ class TokenResponse(BaseModel):
     user_id: str
     role: str
     name: str
+    facility_id: str | None = None
+    facility_name: str | None = None
+    language_pref: str
 
 
 @router.post("/otp/request", status_code=status.HTTP_200_OK)
 async def request_otp(body: OTPRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
-        select(User).where(User.phone == body.phone, User.is_active == True)
+        select(User).where(User.phone == body.phone, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -105,7 +108,7 @@ async def verify_otp(body: OTPVerify, db: AsyncSession = Depends(get_db)):
         del _otp_store[body.phone]
 
     result = await db.execute(
-        select(User).where(User.phone == body.phone, User.is_active == True)
+        select(User).where(User.phone == body.phone, User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -114,6 +117,12 @@ async def verify_otp(body: OTPVerify, db: AsyncSession = Depends(get_db)):
     access = create_access_token(user.id, extra={"role": user.role, "facility_id": str(user.facility_id) if user.facility_id else None})
     refresh = create_refresh_token(user.id)
 
+    facility_name = None
+    if user.facility_id:
+        from models.facility import Facility
+        fac_result = await db.execute(select(Facility.name).where(Facility.id == user.facility_id))
+        facility_name = fac_result.scalar_one_or_none()
+
     log.info("user_login", user_id=str(user.id), role=user.role)
     return TokenResponse(
         access_token=access,
@@ -121,6 +130,9 @@ async def verify_otp(body: OTPVerify, db: AsyncSession = Depends(get_db)):
         user_id=str(user.id),
         role=user.role,
         name=user.name,
+        facility_id=str(user.facility_id) if user.facility_id else None,
+        facility_name=facility_name,
+        language_pref=user.language_pref,
     )
 
 
@@ -133,7 +145,7 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token type")
 
     result = await db.execute(
-        select(User).where(User.id == payload["sub"], User.is_active == True)
+        select(User).where(User.id == payload["sub"], User.is_active.is_(True))
     )
     user = result.scalar_one_or_none()
     if not user:
@@ -142,10 +154,19 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     access = create_access_token(user.id, extra={"role": user.role, "facility_id": str(user.facility_id) if user.facility_id else None})
     refresh = create_refresh_token(user.id)
 
+    facility_name = None
+    if user.facility_id:
+        from models.facility import Facility
+        fac_result = await db.execute(select(Facility.name).where(Facility.id == user.facility_id))
+        facility_name = fac_result.scalar_one_or_none()
+
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
         user_id=str(user.id),
         role=user.role,
         name=user.name,
+        facility_id=str(user.facility_id) if user.facility_id else None,
+        facility_name=facility_name,
+        language_pref=user.language_pref,
     )

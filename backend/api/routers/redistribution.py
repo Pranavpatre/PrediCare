@@ -11,13 +11,13 @@ Endpoints:
 
 from __future__ import annotations
 
-import logging
 import sys
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
@@ -33,7 +33,7 @@ from models.prediction import AIPrediction
 from models.redistribution import RedistributionItem, RedistributionPlan
 from models.user import User
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/redistribution", tags=["redistribution"])
 
@@ -322,7 +322,7 @@ async def create_plan(
     med_map: dict[int, Medicine] = {}
     if med_ids:
         med_result = await db.execute(
-            select(Medicine).where(Medicine.id.in_(med_ids), Medicine.is_active == True)
+            select(Medicine).where(Medicine.id.in_(med_ids), Medicine.is_active.is_(True))
         )
         med_map = {m.id: m for m in med_result.scalars().all()}
 

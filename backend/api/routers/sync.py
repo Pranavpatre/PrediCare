@@ -16,11 +16,11 @@ Design:
 
 from __future__ import annotations
 
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text as sqla_text
@@ -33,7 +33,7 @@ from models.facility import Facility
 from models.inventory import Medicine, StockBatch
 from models.user import User
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -190,7 +190,7 @@ async def push_sync(
             # Validate medicine exists and is active
             med_check = await db.execute(
                 select(Medicine.id, Medicine.unit)
-                .where(Medicine.id == rec.medicine_id, Medicine.is_active == True)
+                .where(Medicine.id == rec.medicine_id, Medicine.is_active.is_(True))
             )
             med_row = med_check.first()
             if not med_row:
@@ -266,7 +266,7 @@ async def push_sync(
                 INSERT INTO audit_log
                     (user_id, action, table_name, record_id, new_value, created_at)
                 VALUES
-                    (:user_id, 'STOCK_UPDATE', 'stock_batches', :record_id, :new_value::jsonb, :created_at)
+                    (:user_id, 'STOCK_UPDATE', 'stock_batches', :record_id, CAST(:new_value AS jsonb), :created_at)
                 """
             )
             import json
@@ -382,7 +382,7 @@ async def push_sync(
                 INSERT INTO audit_log
                     (user_id, action, table_name, record_id, new_value, created_at)
                 VALUES
-                    (:user_id, 'ATTENDANCE', 'users', :record_id, :new_value::jsonb, :created_at)
+                    (:user_id, 'ATTENDANCE', 'users', :record_id, CAST(:new_value AS jsonb), :created_at)
                 """
             )
             await db.execute(
@@ -471,7 +471,7 @@ async def pull_sync(
     # Medicines have no updated_at; return all active medicines (table is small).
     # A future optimisation could track a medicines updated_at.
     med_result = await db.execute(
-        select(Medicine).where(Medicine.is_active == True)
+        select(Medicine).where(Medicine.is_active.is_(True))
     )
     medicines_out = [
         MedicineDelta(

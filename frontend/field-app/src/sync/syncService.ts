@@ -50,7 +50,10 @@ export async function flushLedger(): Promise<{ synced: number; errors: number }>
       await client.put(`/ledger/${item.kind}/${item.facility_id}`, item.payload)
       await db.pendingLedger.update(item.id!, { synced: true as unknown as boolean })
       synced++
-    } catch {
+    } catch (err) {
+      // Previously swallowed silently — a permanently-stuck pending record with
+      // no visible reason is impossible to diagnose. Surface it in the console.
+      console.error(`[sync] failed to flush pending ${item.kind} for facility ${item.facility_id}:`, err)
       errors++
     }
   }
@@ -105,7 +108,8 @@ export async function syncPendingData(): Promise<{ synced: number; errors: numbe
         db.pendingAttendance.update(r.id!, { synced: true as unknown as boolean }),
       ),
     ])
-  } catch {
+  } catch (err) {
+    console.error('[sync] /sync/push batch failed:', err)
     errors = stockUpdates.length + footfall.length + attendance.length
   }
 
@@ -121,8 +125,8 @@ export async function fetchAndCacheMedicines(): Promise<void> {
     })
     const medicines = Array.isArray(data) ? data : (data?.medicines ?? [])
     await db.medicines.bulkPut(medicines)
-  } catch {
-    /* silent — offline or server unavailable */
+  } catch (err) {
+    console.error('[sync] failed to fetch/cache medicines:', err)
   }
 }
 
@@ -142,7 +146,7 @@ export async function fetchAndCacheNotifications(): Promise<void> {
       read: readSet.has(n.id) ? true : n.read,
     }))
     await db.notifications.bulkPut(merged)
-  } catch {
-    /* silent */
+  } catch (err) {
+    console.error('[sync] failed to fetch/cache notifications:', err)
   }
 }

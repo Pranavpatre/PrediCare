@@ -25,7 +25,7 @@ export default function LoginPage() {
     setError(null)
     setLoading(true)
     try {
-      await axios.post(`${API_URL}/api/v1/auth/request-otp`, { phone })
+      await axios.post(`${API_URL}/api/v1/auth/otp/request`, { phone })
       setStep('otp')
     } catch (err: unknown) {
       const msg = axios.isAxiosError(err) ? err.response?.data?.detail : 'Failed to send OTP'
@@ -56,13 +56,14 @@ export default function LoginPage() {
     setError(null)
     setLoading(true)
     try {
-      const { data } = await axios.post(`${API_URL}/api/v1/auth/verify-otp`, { phone, otp: code })
+      const { data } = await axios.post(`${API_URL}/api/v1/auth/otp/verify`, { phone, otp: code })
       setAuth({
         token: data.access_token,
         facilityId: data.facility_id,
         userId: data.user_id,
         name: data.name,
         facilityName: data.facility_name,
+        languagePref: data.language_pref,
       })
       navigate('/daily', { replace: true })
     } catch (err: unknown) {
@@ -80,7 +81,7 @@ export default function LoginPage() {
         <div className="w-16 h-16 bg-white rounded-2xl mx-auto flex items-center justify-center shadow-lg">
           <span className="text-3xl" aria-hidden>🏥</span>
         </div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">SmartHealth</h1>
+        <h1 className="text-2xl font-bold text-white tracking-tight">PrediCare</h1>
         <p className="text-teal-200 text-sm">PHC Field Worker App</p>
       </div>
 

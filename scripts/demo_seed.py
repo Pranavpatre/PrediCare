@@ -62,6 +62,52 @@ def set_insulin_stock(cur, facility_code: str, quantity: int) -> None:
     print(f"  [stock]  {facility_code}: {quantity} vials of {INSULIN_NAME}  (batch {batch_number})")
 
 
+def create_prediction(cur) -> str:
+    """Create (or reuse) the stockout prediction that the alert/transfer link back to.
+
+    approve_plan() only resolves an alert if the redistribution_item's
+    trigger_prediction matches the alert's prediction_id — without this row,
+    approving the demo plan would never resolve the alert, leaving the
+    facility stuck RED even after a successful transfer.
+    """
+    cur.execute("SELECT id FROM facilities WHERE code = %s", (FACILITY_SHIRUR,))
+    shirur_id = str(cur.fetchone()["id"])
+
+    cur.execute("SELECT id FROM medicines WHERE name = %s", (INSULIN_NAME,))
+    medicine_id = cur.fetchone()["id"]
+
+    cur.execute(
+        """
+        SELECT id FROM ai_predictions
+        WHERE facility_id = %s AND medicine_id = %s AND prediction_type = 'STOCKOUT'
+        ORDER BY predicted_at DESC
+        LIMIT 1
+        """,
+        (shirur_id, medicine_id),
+    )
+    existing = cur.fetchone()
+    if existing:
+        prediction_id = str(existing["id"])
+        print(f"  [pred]   Reusing existing stockout prediction  id={prediction_id}")
+        return prediction_id
+
+    cur.execute(
+        """
+        INSERT INTO ai_predictions
+            (facility_id, medicine_id, prediction_type, horizon_days,
+             predicted_value, confidence, reasoning, recommendation, model_version)
+        VALUES (%s, %s, 'STOCKOUT', 2, 2, 0.91,
+                '{"trend": "steady_depletion"}'::jsonb,
+                'Transfer from Haveli PHC available.', 'demo-seed')
+        RETURNING id
+        """,
+        (shirur_id, medicine_id),
+    )
+    prediction_id = str(cur.fetchone()["id"])
+    print(f"  [pred]   Created stockout prediction  id={prediction_id}")
+    return prediction_id
+
+
 def create_redistribution_plan(cur) -> str:
     """Create (or reuse) a PENDING redistribution plan for Pune district."""
     cur.execute("SELECT id FROM districts WHERE code = %s", (DISTRICT_CODE,))
@@ -99,7 +145,7 @@ def create_redistribution_plan(cur) -> str:
     return plan_id
 
 
-def create_redistribution_item(cur, plan_id: str) -> None:
+def create_redistribution_item(cur, plan_id: str, prediction_id: str) -> None:
     """Add the Haveli → Shirur insulin transfer item to the plan."""
     cur.execute("SELECT id FROM facilities WHERE code = %s", (FACILITY_SHIRUR,))
     shirur_id = str(cur.fetchone()["id"])
@@ -126,15 +172,16 @@ def create_redistribution_item(cur, plan_id: str) -> None:
         """
         INSERT INTO redistribution_items
             (plan_id, medicine_id, from_facility, to_facility,
-             quantity, distance_km, estimated_cost, estimated_saving, status)
-        VALUES (%s, %s, %s, %s, 60, 34.00, 2000.00, 18000.00, 'PENDING')
+             quantity, distance_km, estimated_cost, estimated_saving, status,
+             trigger_prediction)
+        VALUES (%s, %s, %s, %s, 60, 34.00, 2000.00, 18000.00, 'PENDING', %s)
         """,
-        (plan_id, medicine_id, haveli_id, shirur_id),
+        (plan_id, medicine_id, haveli_id, shirur_id, prediction_id),
     )
     print("  [item]   Haveli → Shirur: 60 vials  (34 km, saves ₹18,000)")
 
 
-def create_alert(cur) -> str:
+def create_alert(cur, prediction_id: str) -> str:
     """Create (or reuse) a CRITICAL/OPEN alert for Shirur insulin stockout."""
     cur.execute("SELECT id FROM facilities WHERE code = %s", (FACILITY_SHIRUR,))
     shirur_id = str(cur.fetchone()["id"])
@@ -163,11 +210,11 @@ def create_alert(cur) -> str:
     )
     cur.execute(
         """
-        INSERT INTO alerts (facility_id, severity, status, title, body)
-        VALUES (%s, 'CRITICAL', 'OPEN', %s, %s)
+        INSERT INTO alerts (facility_id, severity, status, title, body, prediction_id)
+        VALUES (%s, 'CRITICAL', 'OPEN', %s, %s, %s)
         RETURNING id
         """,
-        (shirur_id, title, body),
+        (shirur_id, title, body, prediction_id),
     )
     alert_id = str(cur.fetchone()["id"])
     print(f"  [alert]  Created CRITICAL alert for Shirur PHC  id={alert_id}")
@@ -260,14 +307,17 @@ def main():
                 # b) PHC-08 Haveli: 85 vials (surplus donor)
                 set_insulin_stock(cur, FACILITY_HAVELI, 85)
 
-                # c) Redistribution plan for Pune district
+                # c) Stockout prediction that the alert + transfer link back to
+                prediction_id = create_prediction(cur)
+
+                # d) Redistribution plan for Pune district
                 plan_id = create_redistribution_plan(cur)
 
-                # d) Redistribution item: Haveli → Shirur, 60 vials
-                create_redistribution_item(cur, plan_id)
+                # e) Redistribution item: Haveli → Shirur, 60 vials
+                create_redistribution_item(cur, plan_id, prediction_id)
 
-                # e) Alert for PHC-01 stockout risk
-                alert_id = create_alert(cur)
+                # f) Alert for PHC-01 stockout risk
+                alert_id = create_alert(cur, prediction_id)
 
                 # f) Today's daily_snapshot for PHC-01 (voice entry demo)
                 insert_voice_snapshot(cur)

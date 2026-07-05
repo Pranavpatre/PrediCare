@@ -326,7 +326,7 @@ async def acknowledge_alert(
                     (user_id, action, table_name, record_id, old_value, new_value, ip_address)
                 VALUES
                     (:user_id, :action, :table_name, :record_id,
-                     :old_value::jsonb, :new_value::jsonb, :ip_address::inet)
+                     CAST(:old_value AS jsonb), CAST(:new_value AS jsonb), CAST(:ip_address AS inet))
                 """
             ),
             {

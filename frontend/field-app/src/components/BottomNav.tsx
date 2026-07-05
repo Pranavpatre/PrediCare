@@ -6,6 +6,7 @@ const tabs = [
   { to: '/daily', key: 'nav.daily', icon: '📋' },
   { to: '/stock', key: 'nav.stock', icon: '💊' },
   { to: '/notifications', key: 'nav.alerts', icon: '🔔' },
+  { to: '/logs', key: 'nav.logs', icon: '📜' },
 ]
 
 export default function BottomNav() {

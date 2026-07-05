@@ -13,12 +13,13 @@ Table alignment notes (001_core.sql):
 
 from __future__ import annotations
 
-import logging
 import os
+
+import structlog
 
 from celery_app import celery_app
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 
 # Trigger retraining when recent MAE exceeds baseline by this fraction.
 MAE_DRIFT_THRESHOLD = 0.15  # 15% degradation

@@ -149,6 +149,31 @@ class FootfallTally(BaseModel):
     emergency: int = 0
 
 
+@router.get("/footfall/{facility_id}", response_model=FootfallTally)
+async def get_footfall(
+    facility_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_staff_plus),
+) -> FootfallTally:
+    """Today's footfall tally so far, from the latest daily_snapshot row."""
+    result = await db.execute(
+        sa_text(
+            """
+            SELECT opd_count, ipd_count, emergency_count
+            FROM daily_snapshots
+            WHERE facility_id = :fid AND time::date = CURRENT_DATE
+            ORDER BY time DESC
+            LIMIT 1
+            """
+        ),
+        {"fid": str(facility_id)},
+    )
+    row = result.first()
+    if not row:
+        return FootfallTally()
+    return FootfallTally(general=row.opd_count or 0, maternal=row.ipd_count or 0, emergency=row.emergency_count or 0)
+
+
 @router.put("/footfall/{facility_id}", status_code=status.HTTP_201_CREATED)
 async def put_footfall(
     facility_id: uuid.UUID,

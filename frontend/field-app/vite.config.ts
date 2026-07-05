@@ -18,8 +18,8 @@ export default defineConfig({
         ],
       },
       manifest: {
-        name: 'SmartHealth Field App',
-        short_name: 'SmartHealth',
+        name: 'PrediCare Field App',
+        short_name: 'PrediCare',
         description: 'PHC data entry — offline first',
         theme_color: '#0A7060',
         background_color: '#F5F4F0',

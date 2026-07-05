@@ -5,7 +5,14 @@ export interface VoiceResult {
   confidence: number
 }
 
-export function useVoiceInput(language: string = 'hi-IN') {
+// Maps the user's stored 2-letter language_pref to a BCP-47 speech-recognition tag.
+export const VOICE_LANG_MAP: Record<string, string> = {
+  hi: 'hi-IN', mr: 'mr-IN', ta: 'ta-IN', te: 'te-IN',
+  kn: 'kn-IN', bn: 'bn-IN', gu: 'gu-IN', or: 'or-IN', en: 'en-IN',
+  ml: 'ml-IN',
+}
+
+export function useVoiceInput(language: string = 'en-IN') {
   const [isListening, setIsListening] = useState(false)
   const [transcript, setTranscript] = useState('')
   const [error, setError] = useState<string | null>(null)

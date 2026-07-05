@@ -28,7 +28,7 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <span className="font-bold text-teal-700 text-lg tracking-tight">SmartHealth</span>
+          <span className="font-bold text-teal-700 text-lg tracking-tight">PrediCare</span>
           <NavLink to="/dashboard" className={navClass}>{t('nav.dashboard')}</NavLink>
           <NavLink to="/facilities" className={navClass}>{t('nav.facilities')}</NavLink>
           <NavLink to="/redistribution" className={navClass}>{t('nav.redistribution')}</NavLink>

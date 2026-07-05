@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select, update
@@ -30,7 +30,7 @@ from db import get_db
 from models.alert import Alert
 from models.redistribution import RedistributionItem, RedistributionPlan
 
-log = logging.getLogger(__name__)
+log = structlog.get_logger(__name__)
 settings = get_settings()
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])

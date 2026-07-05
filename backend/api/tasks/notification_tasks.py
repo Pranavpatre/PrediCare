@@ -15,12 +15,26 @@ Table alignment notes (001_core.sql):
 
 from __future__ import annotations
 
-import logging
+import json
 import os
+import sys
+
+import structlog
 
 from celery_app import celery_app
 
-log = logging.getLogger(__name__)
+# Celery's app-loader puts the app's cwd on sys.path only transiently while
+# starting up (removed again once app/task loading finishes), so lazy imports
+# done inside task bodies below need it re-added at call time, not just at
+# module-import time — /app/integrations is bind-mounted alongside /app/ml-models.
+_APP_ROOT = os.environ.get("APP_ROOT", "/app")
+
+
+def _ensure_app_root_on_path() -> None:
+    if _APP_ROOT not in sys.path:
+        sys.path.insert(0, _APP_ROOT)
+
+log = structlog.get_logger(__name__)
 
 
 def _sync_db_url() -> str:
@@ -118,7 +132,12 @@ def send_whatsapp_alert(
         )
         plan = cur.fetchone()
 
-        from integrations.whatsapp import WhatsAppClient
+        _ensure_app_root_on_path()
+        from integrations.whatsapp import (
+            WhatsAppClient,
+            render_stockout_alert_with_plan,
+            render_stockout_alert_no_plan,
+        )
         client = WhatsAppClient()
 
         sent = 0
@@ -130,6 +149,8 @@ def send_whatsapp_alert(
             officer_user_id: str = str(officer["user_id"])
 
             message_text: str
+            template_key: str
+            template_params: dict
             if plan:
                 client.send_stockout_alert_with_plan(
                     phone=phone,
@@ -142,10 +163,17 @@ def send_whatsapp_alert(
                     plan_id=str(plan["plan_id"]),
                     language=lang,
                 )
-                message_text = (
-                    f"{severity}: {facility_name} — {medicine_name} in "
-                    f"{days_until_stockout}d. Transfer plan {plan['plan_id']} available."
+                message_text = render_stockout_alert_with_plan(
+                    facility_name=facility_name, medicine_name=medicine_name,
+                    days_until_stockout=days_until_stockout, severity=severity,
+                    donor_facility_name=plan["donor_name"], transfer_quantity=plan["quantity"],
+                    language=lang,
                 )
+                template_key = "stockoutWithPlan"
+                template_params = {
+                    "severity": severity, "facility": facility_name, "medicine": medicine_name,
+                    "days": days_until_stockout, "qty": plan["quantity"], "donor": plan["donor_name"],
+                }
             else:
                 client.send_stockout_alert_no_plan(
                     phone=phone,
@@ -155,20 +183,29 @@ def send_whatsapp_alert(
                     severity=severity,
                     language=lang,
                 )
-                message_text = (
-                    f"{severity}: {facility_name} — {medicine_name} in "
-                    f"{days_until_stockout}d. No surplus nearby. Escalate."
+                message_text = render_stockout_alert_no_plan(
+                    facility_name=facility_name, medicine_name=medicine_name,
+                    days_until_stockout=days_until_stockout, severity=severity, language=lang,
                 )
+                template_key = "stockoutNoPlan"
+                template_params = {
+                    "severity": severity, "facility": facility_name,
+                    "medicine": medicine_name, "days": days_until_stockout,
+                }
 
             # ── Log notification delivery ─────────────────────────────────────
+            # template_key/template_params let the client re-render the body via
+            # i18n in whatever language the worker currently has selected —
+            # `message`/`language` remain as a fallback for channels or rows
+            # that predate templating.
             cur.execute(
                 """
                 INSERT INTO notifications (
-                    user_id, channel, language, message, sent_at
+                    user_id, channel, language, message, template_key, template_params, sent_at
                 )
-                VALUES (%s, 'whatsapp', %s, %s, NOW())
+                VALUES (%s, 'whatsapp', %s, %s, %s, %s::jsonb, NOW())
                 """,
-                (officer_user_id, lang, message_text),
+                (officer_user_id, lang, message_text, template_key, json.dumps(template_params)),
             )
             sent += 1
 
@@ -225,7 +262,8 @@ def send_morning_digest(self) -> dict:
         )
         officers = cur.fetchall()
 
-        from integrations.whatsapp import WhatsAppClient
+        _ensure_app_root_on_path()
+        from integrations.whatsapp import WhatsAppClient, render_morning_digest
         client = WhatsAppClient()
         sent = 0
 
@@ -291,9 +329,10 @@ def send_morning_digest(self) -> dict:
                 language=lang,
             )
 
-            digest_text = (
-                f"Morning digest: {pending_alerts} open alerts, "
-                f"avg score {avg_district_score}."
+            digest_text = render_morning_digest(
+                officer_name=name, pending_alerts=pending_alerts,
+                avg_district_score=avg_district_score, bottom_facilities=bottom_facilities,
+                language=lang,
             )
             cur.execute(
                 """
@@ -371,7 +410,12 @@ def send_transfer_notifications(self, plan_id: str) -> dict:
             conn.close()
             return {"sent": 0, "reason": "plan_not_found"}
 
-        from integrations.whatsapp import WhatsAppClient
+        _ensure_app_root_on_path()
+        from integrations.whatsapp import (
+            WhatsAppClient,
+            render_dispatch_instruction,
+            render_incoming_transfer_notification,
+        )
         client = WhatsAppClient()
         sent = 0
 
@@ -403,17 +447,19 @@ def send_transfer_notifications(self, plan_id: str) -> dict:
                     destination_name=to_name,
                     language=lang,
                 )
-                dispatch_msg = (
-                    f"Dispatch {qty} units of {medicine_name} to {to_name}."
+                dispatch_msg = render_dispatch_instruction(
+                    medicine_name=medicine_name, quantity=qty,
+                    destination_name=to_name, language=lang,
                 )
+                dispatch_params = {"qty": qty, "medicine": medicine_name, "destination": to_name}
                 cur.execute(
                     """
                     INSERT INTO notifications (
-                        user_id, channel, language, message, sent_at
+                        user_id, channel, language, message, template_key, template_params, sent_at
                     )
-                    VALUES (%s, 'whatsapp', %s, %s, NOW())
+                    VALUES (%s, 'whatsapp', %s, %s, 'dispatchInstruction', %s::jsonb, NOW())
                     """,
-                    (str(donor_user["id"]), lang, dispatch_msg),
+                    (str(donor_user["id"]), lang, dispatch_msg, json.dumps(dispatch_params)),
                 )
                 sent += 1
 
@@ -437,17 +483,19 @@ def send_transfer_notifications(self, plan_id: str) -> dict:
                     source_name=from_name,
                     language=lang,
                 )
-                incoming_msg = (
-                    f"{qty} units of {medicine_name} incoming from {from_name}."
+                incoming_msg = render_incoming_transfer_notification(
+                    medicine_name=medicine_name, quantity=qty,
+                    source_name=from_name, language=lang,
                 )
+                incoming_params = {"qty": qty, "medicine": medicine_name, "source": from_name}
                 cur.execute(
                     """
                     INSERT INTO notifications (
-                        user_id, channel, language, message, sent_at
+                        user_id, channel, language, message, template_key, template_params, sent_at
                     )
-                    VALUES (%s, 'whatsapp', %s, %s, NOW())
+                    VALUES (%s, 'whatsapp', %s, %s, 'incomingTransfer', %s::jsonb, NOW())
                     """,
-                    (str(recv_user["id"]), lang, incoming_msg),
+                    (str(recv_user["id"]), lang, incoming_msg, json.dumps(incoming_params)),
                 )
                 sent += 1
 

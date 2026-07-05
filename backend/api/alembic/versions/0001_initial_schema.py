@@ -642,6 +642,8 @@ def upgrade() -> None:
         sa.Column("channel", sa.String(20), nullable=False),
         sa.Column("language", sa.String(10), nullable=False),
         sa.Column("message", sa.Text(), nullable=False),
+        sa.Column("template_key", sa.String(64), nullable=True),
+        sa.Column("template_params", postgresql.JSONB(), nullable=True),
         sa.Column("sent_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("delivered_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.Column("response", sa.String(20), nullable=True),
