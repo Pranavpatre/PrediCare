@@ -298,7 +298,9 @@ CREATE TABLE alerts (
     created_at      TIMESTAMPTZ DEFAULT NOW(),
     acknowledged_by UUID REFERENCES users(id),
     acknowledged_at TIMESTAMPTZ,
-    resolved_at     TIMESTAMPTZ
+    resolved_at     TIMESTAMPTZ,
+    message_key     TEXT,                   -- e.g. 'stockoutWithPlan' — lets the client re-render via i18n
+    message_params  JSONB                   -- interpolation values for message_key
 );
 
 CREATE INDEX alerts_facility_status ON alerts(facility_id, status, created_at DESC);

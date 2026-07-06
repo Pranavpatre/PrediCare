@@ -1,6 +1,9 @@
 # ---- OS ----
 .DS_Store
 
+# ---- Firebase ----
+.firebase/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

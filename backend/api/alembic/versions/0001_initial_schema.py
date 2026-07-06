@@ -635,6 +635,8 @@ def upgrade() -> None:
             "acknowledged_at", sa.TIMESTAMP(timezone=True), nullable=True
         ),
         sa.Column("resolved_at", sa.TIMESTAMP(timezone=True), nullable=True),
+        sa.Column("message_key", sa.Text(), nullable=True),
+        sa.Column("message_params", postgresql.JSONB(), nullable=True),
     )
 
     op.execute(

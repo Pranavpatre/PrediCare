@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "default": "smart-health-d27c9"
+  },
+  "targets": {
+    "smart-health-d27c9": {
+      "hosting": {
+        "dashboard": [
+          "predicare-dashboard"
+        ],
+        "field-app": [
+          "predicare-field-app"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

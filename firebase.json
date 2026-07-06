@@ -1,0 +1,16 @@
+{
+  "hosting": [
+    {
+      "target": "dashboard",
+      "public": "frontend/dashboard/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    },
+    {
+      "target": "field-app",
+      "public": "frontend/field-app/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    }
+  ]
+}
