@@ -6,7 +6,7 @@ Schedule (from celery_app.py):
   - run_anomaly_scan   : every hour
 
 Table alignment notes (001_core.sql):
-  - facility_health_scores is a TimescaleDB hypertable partitioned on `time`.
+  - facility_health_scores is a hypertable in local dev (TimescaleDB) and a plain table on Cloud SQL; either way `time` is required.
     Every INSERT must supply `time`.
   - Weights: medicine 25%, doctor 20%, bed 20%, wait_time 20%, diagnostics 15%.
     (overall_score is the composite; the remaining 100% is covered by all five.)
@@ -41,7 +41,7 @@ def _sync_db_url() -> str:
 def run_health_scores(self) -> dict:
     """
     Compute a composite health score for every active facility and persist a
-    new row in facility_health_scores (TimescaleDB hypertable).
+    new row in facility_health_scores.
 
     Sub-scores (0-100):
       medicine_score    — avg stock coverage vs reorder_level, capped at 100
@@ -195,7 +195,7 @@ def run_health_scores(self) -> dict:
                 if cur.fetchone():
                     status = "RED"
 
-                # ── Persist (TimescaleDB hypertable — must supply `time`) ────
+                # ── Persist (must supply `time`) ──────────────────────────────
                 cur.execute(
                     """
                     INSERT INTO facility_health_scores (

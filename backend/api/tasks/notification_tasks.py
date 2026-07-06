@@ -9,8 +9,9 @@ Table alignment notes (001_core.sql):
   - redistribution_items: columns are `from_facility` / `to_facility` (UUID),
     not from_facility_id / to_facility_id.
   - alerts.status ENUM: OPEN | ACKNOWLEDGED | RESOLVED | SNOOZED (not PENDING).
-  - facility_health_scores is a TimescaleDB hypertable; use DISTINCT ON to get
-    the latest score per facility.
+  - facility_health_scores holds one row per facility per scoring run; use
+    DISTINCT ON (native Postgres, no TimescaleDB dependency) to get the
+    latest score per facility.
 """
 
 from __future__ import annotations
@@ -286,9 +287,9 @@ def send_morning_digest(self) -> dict:
             )
             pending_alerts: int = int(cur.fetchone()[0] or 0)
 
-            # ── Latest health score per facility (TimescaleDB DISTINCT ON) ────
-            # facility_health_scores is a hypertable; use DISTINCT ON (facility_id)
-            # ORDER BY facility_id, time DESC to retrieve the latest row each.
+            # ── Latest health score per facility (plain Postgres DISTINCT ON) ─
+            # DISTINCT ON (facility_id) ORDER BY facility_id, time DESC pulls
+            # the latest row per facility — works identically on Cloud SQL.
             cur.execute(
                 """
                 SELECT

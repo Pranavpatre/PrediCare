@@ -4,7 +4,7 @@ Health Scores router — Facility health score dashboard.
 Endpoints:
   GET /health-scores                       latest score per facility for a district
   GET /health-scores/mine                  latest score for the current user's own facility (PHC_ADMIN)
-  GET /health-scores/{facility_id}/history 30-day time-series (TimescaleDB time_bucket)
+  GET /health-scores/{facility_id}/history 30-day time-series (date_trunc daily buckets)
 """
 
 from __future__ import annotations
@@ -244,7 +244,8 @@ async def get_score_history(
 ):
     """
     Return the last 30 days of daily health score history for a facility.
-    Uses TimescaleDB time_bucket to aggregate to one row per day.
+    Uses date_trunc to aggregate to one row per day (plain Postgres, no
+    TimescaleDB dependency — works on Cloud SQL).
     Results sorted by date ASC.
     """
     from auth.rbac import ROLE_HIERARCHY
@@ -279,11 +280,12 @@ async def get_score_history(
                 detail="Facility does not belong to your district",
             )
 
-    # TimescaleDB time_bucket aggregation — 1 day buckets, last 30 days
+    # Plain-Postgres equivalent of TimescaleDB's time_bucket('1 day', time) —
+    # date_trunc gives the same 1-day buckets and runs on Cloud SQL too.
     sql = sqla_text(
         """
         SELECT
-            time_bucket('1 day', time)          AS day,
+            date_trunc('day', time)             AS day,
             AVG(overall_score)                  AS overall_score,
             AVG(medicine_score)                 AS medicine_score,
             AVG(doctor_score)                   AS doctor_score,

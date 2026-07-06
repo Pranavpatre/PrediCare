@@ -17,11 +17,41 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _create_hypertable_if_available(table: str) -> None:
+    """Call create_hypertable() only where the timescaledb extension is
+    actually installed. On Cloud SQL (no timescaledb) this is a no-op and
+    the table stays a plain Postgres table — same schema/columns either way,
+    just without hypertable partitioning/compression."""
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+                PERFORM create_hypertable('{table}', 'time', if_not_exists => TRUE);
+            END IF;
+        END $$;
+        """
+    )
+
+
 def upgrade() -> None:
     # ------------------------------------------------------------------
     # Extensions
     # ------------------------------------------------------------------
-    op.execute("CREATE EXTENSION IF NOT EXISTS timescaledb;")
+    # timescaledb isn't available on Cloud SQL — only enable it where the
+    # extension actually exists (local/self-hosted Postgres). Hypertable
+    # creation below is guarded the same way, so this migration runs
+    # unmodified against both environments; Cloud SQL just gets plain tables.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb') THEN
+                CREATE EXTENSION IF NOT EXISTS timescaledb;
+            END IF;
+        END $$;
+        """
+    )
     op.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
     op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";')
 
@@ -436,9 +466,7 @@ def upgrade() -> None:
         sa.Column("language_used", sa.String(10), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
     )
-    op.execute(
-        "SELECT create_hypertable('daily_snapshots', 'time', if_not_exists => TRUE);"
-    )
+    _create_hypertable_if_available("daily_snapshots")
     op.execute(
         "CREATE INDEX daily_snapshots_facility_time"
         " ON daily_snapshots(facility_id, time DESC);"
@@ -476,9 +504,7 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.execute(
-        "SELECT create_hypertable('diagnostic_stock_snapshots', 'time', if_not_exists => TRUE);"
-    )
+    _create_hypertable_if_available("diagnostic_stock_snapshots")
 
     # ------------------------------------------------------------------
     # AI Predictions
@@ -775,9 +801,7 @@ def upgrade() -> None:
         sa.Column("overall_score", sa.Numeric(5, 2), nullable=True),
         sa.Column("status", sa.String(10), nullable=True),
     )
-    op.execute(
-        "SELECT create_hypertable('facility_health_scores', 'time', if_not_exists => TRUE);"
-    )
+    _create_hypertable_if_available("facility_health_scores")
 
     # ------------------------------------------------------------------
     # Procurement Escalation

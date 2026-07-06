@@ -5,7 +5,15 @@
 -- ─────────────────────────────────────────────
 -- Extensions
 -- ─────────────────────────────────────────────
-CREATE EXTENSION IF NOT EXISTS timescaledb;
+-- timescaledb isn't available on Cloud SQL — only enable it (and the
+-- hypertables below) where the extension actually exists. On Cloud SQL
+-- these become plain, un-partitioned tables with the same columns/queries.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb') THEN
+        CREATE EXTENSION IF NOT EXISTS timescaledb;
+    END IF;
+END $$;
 CREATE EXTENSION IF NOT EXISTS postgis;       -- for distance-matrix queries
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
@@ -149,7 +157,12 @@ CREATE TABLE daily_snapshots (
     notes           TEXT
 );
 
-SELECT create_hypertable('daily_snapshots', 'time');
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('daily_snapshots', 'time', if_not_exists => TRUE);
+    END IF;
+END $$;
 CREATE INDEX daily_snapshots_facility_time ON daily_snapshots(facility_id, time DESC);
 
 -- ────────────────────────────────────────────
@@ -173,7 +186,12 @@ CREATE TABLE diagnostic_stock_snapshots (
     recorded_by     UUID REFERENCES users(id)
 );
 
-SELECT create_hypertable('diagnostic_stock_snapshots', 'time');
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('diagnostic_stock_snapshots', 'time', if_not_exists => TRUE);
+    END IF;
+END $$;
 
 -- ─────────────────────────────────────────────
 -- AI Predictions
@@ -255,7 +273,12 @@ CREATE TABLE facility_health_scores (
     status              VARCHAR(10)     -- GREEN | YELLOW | RED
 );
 
-SELECT create_hypertable('facility_health_scores', 'time');
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM create_hypertable('facility_health_scores', 'time', if_not_exists => TRUE);
+    END IF;
+END $$;
 
 -- ─────────────────────────────────────────────
 -- Alerts & Notifications

@@ -12,14 +12,14 @@ from db import Base
 
 class FacilityHealthScore(Base):
     """
-    TimescaleDB hypertable — partitioned on `time`.
+    Time-series table (partitioned on `time` in prod via TimescaleDB; a plain indexed table on Cloud SQL — same query surface either way).
     No single-column UUID primary key; composite (time, facility_id) is the natural key.
     A surrogate UUID pk is added here so SQLAlchemy ORM can address rows unambiguously.
     """
 
     __tablename__ = "facility_health_scores"
 
-    # TimescaleDB hypertable; time is the partitioning column
+    # `time` is the partitioning/ordering column (hypertable in local dev, plain indexed column on Cloud SQL)
     time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, primary_key=True
     )
