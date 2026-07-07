@@ -5,6 +5,10 @@ from auth.jwt import get_current_user
 ROLE_HIERARCHY = {
     "FIELD_WORKER": 1,
     "PHC_ADMIN": 2,
+    # Doctor / district-hospital staff. Parallel to PHC_ADMIN in privilege
+    # level; used to gate the referral retrieval endpoints. Higher roles
+    # (DISTRICT_OFFICER+, SUPERADMIN) also satisfy require_role("HOSPITAL_STAFF").
+    "HOSPITAL_STAFF": 2,
     "DISTRICT_OFFICER": 3,
     "STATE_ADMIN": 4,
     "SUPERADMIN": 5,
