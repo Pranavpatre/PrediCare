@@ -167,3 +167,37 @@ async def test_stock_endpoint_exposes_demand_fields(ctx):
         # new fields present on every row (may be False/None until demand model runs)
         assert "demand_based" in rows[0]
         assert "required_stock" in rows[0]
+
+
+# ── Planning (pre-emptive shortages) ──────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_planning_refills_scoped_officer(ctx):
+    client, tk, _ = ctx
+    r = await client.get("/api/v1/planning/refills", headers=H(tk["do"]))
+    assert r.status_code == 200
+    body = r.json()
+    assert "items" in body and "horizon_days" in body
+
+
+@pytest.mark.anyio
+async def test_planning_refills_superadmin_needs_scope(ctx):
+    client, tk, _ = ctx
+    r = await client.get("/api/v1/planning/refills", headers=H(tk["super"]))
+    assert r.status_code == 400  # must pass a district or state
+
+
+@pytest.mark.anyio
+async def test_planning_capacity(ctx):
+    client, tk, _ = ctx
+    r = await client.get("/api/v1/planning/capacity", headers=H(tk["do"]))
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)
+
+
+@pytest.mark.anyio
+async def test_planning_csv_download(ctx):
+    client, tk, _ = ctx
+    r = await client.get("/api/v1/planning/refills.csv", headers=H(tk["do"]))
+    assert r.status_code == 200
+    assert "text/csv" in r.headers.get("content-type", "")

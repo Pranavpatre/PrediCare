@@ -88,7 +88,8 @@ jobs:
           for f in 001_core 003_state_infrastructure 004_staff_attendance \
                    005_district_footfall 006_beds_and_tests \
                    007_district_hmis_metrics 008_latest_score_matviews \
-                   009_referrals_and_abdm 010_doctors 011_demand_model; do
+                   009_referrals_and_abdm 010_doctors 011_demand_model \
+                   012_planning; do
             echo "== applying $f.sql =="
             PGPASSWORD=smarthealth_test psql -h localhost -U smarthealth \
               -d smarthealth_test -v ON_ERROR_STOP=1 -f "data/schemas/$f.sql"

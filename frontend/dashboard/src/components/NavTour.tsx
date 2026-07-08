@@ -1,30 +1,31 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 
 interface TourStep {
+  route?: string
   anchor?: string
   icon: string
   titleKey: string
   descKey: string
 }
 
-// The tour walks through every screen the user can reach (what each one is
-// for), interleaved with the key sections on the dashboard itself. Steps with
-// an `anchor` scroll to that section on the dashboard; screen-overview steps
-// have no anchor and just explain the page. Reuses each screen's existing
-// localized subtitle so no screen goes untranslated.
+// The tour walks through every screen the admin can reach (what each one is
+// for), interleaved with the key sections on the dashboard itself. As each step
+// is shown the tour NAVIGATES to that screen (`route`) so the user sees the page
+// being described; `anchor` steps additionally scroll to a dashboard section.
+// Reuses each screen's existing localized subtitle so no screen goes untranslated.
 const STEPS: TourStep[] = [
   { icon: '👋', titleKey: 'tour.welcome_title', descKey: 'tour.welcome_desc' },
-  { icon: '📊', titleKey: 'nav.dashboard', descKey: 'tour.screen_dashboard_desc' },
-  { anchor: 'map', icon: '🗺️', titleKey: 'dashboard.district_map', descKey: 'dashboard.info_map' },
-  { anchor: 'alerts', icon: '🔔', titleKey: 'dashboard.alert_feed', descKey: 'dashboard.info_alerts' },
-  { anchor: 'at-risk', icon: '⚠️', titleKey: 'dashboard.bottom_facilities', descKey: 'dashboard.info_at_risk' },
-  { icon: '🏥', titleKey: 'nav.facilities', descKey: 'tour.screen_facilities_desc' },
-  { icon: '🔄', titleKey: 'nav.redistribution', descKey: 'redist.subtitle' },
-  { icon: '📤', titleKey: 'nav.refer', descKey: 'referral.refer_subtitle' },
-  { icon: '📥', titleKey: 'nav.referrals', descKey: 'referral.retrieve_subtitle' },
-  { icon: '🤖', titleKey: 'nav.assistant', descKey: 'assistant.subtitle' },
+  { route: '/dashboard', icon: '📊', titleKey: 'nav.dashboard', descKey: 'tour.screen_dashboard_desc' },
+  { route: '/dashboard', anchor: 'map', icon: '🗺️', titleKey: 'dashboard.district_map', descKey: 'dashboard.info_map' },
+  { route: '/dashboard', anchor: 'alerts', icon: '🔔', titleKey: 'dashboard.alert_feed', descKey: 'dashboard.info_alerts' },
+  { route: '/dashboard', anchor: 'at-risk', icon: '⚠️', titleKey: 'dashboard.bottom_facilities', descKey: 'dashboard.info_at_risk' },
+  { route: '/facilities', icon: '🏥', titleKey: 'nav.facilities', descKey: 'tour.screen_facilities_desc' },
+  { route: '/stock', icon: '💊', titleKey: 'nav.stock', descKey: 'stockview.subtitle' },
+  { route: '/planning', icon: '🧭', titleKey: 'nav.planning', descKey: 'planning.subtitle' },
+  { route: '/assistant', icon: '🤖', titleKey: 'nav.assistant', descKey: 'assistant.subtitle' },
 ]
 
 // Best-effort BCP-47 tags for the Web Speech API — actual voice availability
@@ -50,6 +51,7 @@ function speak(text: string, lang: string) {
 
 export default function NavTour() {
   const { t, i18n } = useTranslation()
+  const navigate = useNavigate()
   const showNavTour = useAuthStore((s) => s.showNavTour)
   const dismissNavTour = useAuthStore((s) => s.dismissNavTour)
   const [step, setStep] = useState(0)
@@ -61,10 +63,15 @@ export default function NavTour() {
   useEffect(() => {
     if (!showNavTour) return
     const current = STEPS[step]
+    // Move to the screen being described so the user sees it behind the tour.
+    if (current.route) navigate(current.route)
     if (current.anchor) {
-      document
-        .querySelector(`[data-tour="${current.anchor}"]`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      // Let the (possibly just-navigated) page render before scrolling.
+      setTimeout(() => {
+        document
+          .querySelector(`[data-tour="${current.anchor}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 250)
     }
     const lang = SPEECH_LANG[i18n.language] ?? 'en-IN'
     speak(`${t(current.titleKey)}. ${t(current.descKey)}`, lang)

@@ -13,6 +13,7 @@ celery_app = Celery(
         "tasks.prediction_tasks",
         "tasks.scoring_tasks",
         "tasks.demand_tasks",
+        "tasks.planning_tasks",
         "tasks.notification_tasks",
         "tasks.retraining_tasks",
     ],
@@ -31,6 +32,7 @@ celery_app.conf.update(
         "tasks.prediction_tasks.*": {"queue": "predictions"},
         "tasks.scoring_tasks.*": {"queue": "scoring"},
         "tasks.demand_tasks.*": {"queue": "scoring"},
+        "tasks.planning_tasks.*": {"queue": "notifications"},
         "tasks.notification_tasks.*": {"queue": "notifications"},
         "tasks.retraining_tasks.*": {"queue": "default"},
     },
@@ -65,6 +67,13 @@ celery_app.conf.update(
         "morning-digest": {
             "task": "tasks.notification_tasks.send_morning_digest",
             "schedule": crontab(hour=7, minute=0),  # daily 7 AM IST
+            "options": {"queue": "notifications"},
+        },
+        "planning-digest": {
+            "task": "tasks.planning_tasks.run_daily_planning_digest",
+            # Daily 06:30 IST — email district officers their pre-emptive refill
+            # list ~2 weeks ahead so they can forward it to supply POCs.
+            "schedule": crontab(hour=6, minute=30),
             "options": {"queue": "notifications"},
         },
         "anomaly-scan": {

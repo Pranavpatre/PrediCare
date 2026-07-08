@@ -154,3 +154,20 @@ def test_district_thresholds_ranks_larger_district():
     assert bands is not None
     yellow_cut, green_cut = bands
     assert yellow_cut <= green_cut
+
+
+# ── Seasonality + planning digest ─────────────────────────────────────────────
+
+def test_seasonality_disease_calendar():
+    from services.seasonality import disease_season_multiplier, combined_multiplier
+    assert disease_season_multiplier("ORS", 7) > 1.0          # monsoon spike
+    assert disease_season_multiplier("ANTIHYPERTENSIVE", 7) == 1.0  # chronic, flat
+    # combined multiplier is clamped to a sane band even with extreme inputs
+    assert 0.6 <= combined_multiplier("ORS", 7, 5.0, 3.0) <= 3.0
+
+
+def test_planning_digest_runs_without_smtp():
+    from tasks.planning_tasks import run_daily_planning_digest
+    result = run_daily_planning_digest.apply().get()
+    assert isinstance(result, dict)
+    assert "recipients" in result and "sent" in result

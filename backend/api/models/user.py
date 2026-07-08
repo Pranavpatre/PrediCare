@@ -24,6 +24,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str] = mapped_column(String(15), nullable=False, unique=True)
+    # Optional email — recipient for the daily planning digest (012_planning.sql).
+    email: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     language_pref: Mapped[str] = mapped_column(String(10), nullable=False, default="hi")
     # ABDM Healthcare Professionals Registry (HPR) id — verifies this user is a
     # registered doctor/nurse. Populated later via ABDM (Phase 3).

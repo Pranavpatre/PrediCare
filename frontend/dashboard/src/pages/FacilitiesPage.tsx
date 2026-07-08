@@ -47,6 +47,14 @@ export default function FacilitiesPage() {
   // national (SUPERADMIN) user with everything (no preset).
   const { role, stateId: userStateId, districtId: userDistrictId } = useAuthStore()
   const isNational = role === 'SUPERADMIN'
+  const isState = role === 'STATE_ADMIN'
+  // Scoped admins don't choose their own state/district — the list is already
+  // pinned to it server-side. A national user picks any state+district; a state
+  // admin only narrows by district within their state; a district officer sees
+  // just their district (no location pickers at all).
+  const showStateFilter = isNational
+  const showDistrictFilter = isNational || isState
+  const showNearMe = isNational
   const [stateId, setStateId] = useState<number | undefined>(
     isNational ? undefined : (userStateId ?? undefined),
   )
@@ -110,6 +118,41 @@ export default function FacilitiesPage() {
   const rows = data?.items ?? []
   const total = data?.total ?? 0
 
+  // Client-side column sort: click a header to sort ascending, click again for
+  // descending. Nulls always sort last.
+  type SortKey =
+    | 'name' | 'facility_type' | 'district_name' | 'health_score'
+    | 'traffic_light' | 'doctors_present' | 'patients' | 'stockout_score'
+    | 'beds_occupied' | 'active_alerts'
+  const [sortKey, setSortKey] = useState<SortKey>('health_score')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(k); setSortDir('asc') }
+  }
+  const sortedRows = [...rows].sort((a, b) => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    const av = a[sortKey] as string | number | null
+    const bv = b[sortKey] as string | number | null
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (typeof av === 'string' && typeof bv === 'string') return av.localeCompare(bv) * dir
+    return ((av as number) - (bv as number)) * dir
+  })
+
+  const SortTh = ({ k, label, align = 'left' }: { k: SortKey; label: string; align?: 'left' | 'right' }) => (
+    <th className={`px-4 py-3 ${align === 'right' ? 'text-right' : ''}`}>
+      <button
+        onClick={() => toggleSort(k)}
+        className={`inline-flex items-center gap-1 hover:text-gray-700 ${sortKey === k ? 'text-gray-800' : ''}`}
+      >
+        {label}
+        <span className="text-[10px]">{sortKey === k ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
+  )
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -122,7 +165,8 @@ export default function FacilitiesPage() {
       {/* Filters */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-4">
         <div className="flex flex-wrap gap-4">
-          {/* State */}
+          {/* State — only a national user chooses a state */}
+          {showStateFilter && (
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">{t('facilities.state')}</label>
             <select
@@ -140,7 +184,9 @@ export default function FacilitiesPage() {
               ))}
             </select>
           </div>
-          {/* District */}
+          )}
+          {/* District — national + state admins can narrow by district */}
+          {showDistrictFilter && (
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">{t('facilities.district')}</label>
             <select
@@ -154,7 +200,9 @@ export default function FacilitiesPage() {
               ))}
             </select>
           </div>
-          {/* Geolocation → auto-select district */}
+          )}
+          {/* Geolocation → auto-select district (national only) */}
+          {showNearMe && (
           <div className="flex items-end">
             <button
               type="button"
@@ -166,6 +214,7 @@ export default function FacilitiesPage() {
               📍 {locating ? t('referral.loading') : t('facilities.near_me')}
             </button>
           </div>
+          )}
           {/* Search */}
           <div className="flex-1 min-w-48">
             <label className="block text-xs font-medium text-gray-500 mb-1">{t('facilities.search')}</label>
@@ -232,20 +281,20 @@ export default function FacilitiesPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200">
                 <tr className="text-left text-xs font-medium text-gray-500 uppercase tracking-wide">
-                  <th className="px-4 py-3">{t('facilities.col_name')}</th>
-                  <th className="px-4 py-3">{t('facilities.col_type')}</th>
-                  <th className="px-4 py-3">{t('facilities.col_district')}</th>
-                  <th className="px-4 py-3">{t('facilities.col_score')}</th>
-                  <th className="px-4 py-3">{t('facilities.col_status')}</th>
-                  <th className="px-4 py-3 text-right">{t('facilities.col_doctors')}</th>
-                  <th className="px-4 py-3 text-right">{t('facilities.col_patients')}</th>
-                  <th className="px-4 py-3 text-right">{t('facilities.col_stockout')}</th>
-                  <th className="px-4 py-3 text-right">{t('facilities.col_beds')}</th>
-                  <th className="px-4 py-3">{t('facilities.col_alerts')}</th>
+                  <SortTh k="name" label={t('facilities.col_name')} />
+                  <SortTh k="facility_type" label={t('facilities.col_type')} />
+                  <SortTh k="district_name" label={t('facilities.col_district')} />
+                  <SortTh k="health_score" label={t('facilities.col_score')} />
+                  <SortTh k="traffic_light" label={t('facilities.col_status')} />
+                  <SortTh k="doctors_present" label={t('facilities.col_doctors')} align="right" />
+                  <SortTh k="patients" label={t('facilities.col_patients')} align="right" />
+                  <SortTh k="stockout_score" label={t('facilities.col_stockout')} align="right" />
+                  <SortTh k="beds_occupied" label={t('facilities.col_beds')} align="right" />
+                  <SortTh k="active_alerts" label={t('facilities.col_alerts')} />
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {rows.map((f: FacilityBrowseRow) => (
+                {sortedRows.map((f: FacilityBrowseRow) => (
                   <tr
                     key={f.id}
                     className="hover:bg-gray-50 cursor-pointer transition-colors"

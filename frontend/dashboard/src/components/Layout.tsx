@@ -2,6 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../stores/authStore'
 import NavTour from './NavTour'
+import LocationBadge from './LocationBadge'
 
 const LANGUAGES = [
   { code: 'en', label: 'EN' },
@@ -48,7 +49,7 @@ export default function Layout() {
               <NavLink to="/dashboard" className={navClass}><span aria-hidden>📊</span> {t('nav.dashboard')}</NavLink>
               <NavLink to="/facilities" className={navClass}><span aria-hidden>🏥</span> {t('nav.facilities')}</NavLink>
               <NavLink to="/stock" className={navClass}><span aria-hidden>💊</span> {t('nav.stock')}</NavLink>
-              <NavLink to="/redistribution" className={navClass}><span aria-hidden>🔄</span> {t('nav.redistribution')}</NavLink>
+              <NavLink to="/planning" className={navClass}><span aria-hidden>🧭</span> {t('nav.planning')}</NavLink>
             </>
           )}
           <NavLink to="/assistant" className={navClass}><span aria-hidden>🤖</span> {t('nav.assistant')}</NavLink>
@@ -56,6 +57,7 @@ export default function Layout() {
               /diagnostics but intentionally not shown in the end-user nav. */}
         </div>
         <div className="flex items-center gap-3">
+          <LocationBadge />
           {/* Language switcher */}
           <div className="flex items-center gap-1">
             {LANGUAGES.map((lang) => (

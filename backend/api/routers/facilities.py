@@ -694,7 +694,9 @@ async def browse_facilities(
     # scale. Alert counts are pre-aggregated in a CTE.
     cte = (
         "WITH alert_ct AS ("
-        "  SELECT facility_id, count(*) AS c FROM alerts WHERE status = 'OPEN' GROUP BY facility_id) "
+        "  SELECT facility_id, count(*) AS c FROM alerts WHERE status = 'OPEN' GROUP BY facility_id), "
+        "doc_ct AS ("
+        "  SELECT facility_id, count(*) AS n FROM doctors GROUP BY facility_id) "
     )
     joins = (
         " FROM facilities f"
@@ -703,6 +705,7 @@ async def browse_facilities(
         " LEFT JOIN mv_facility_latest_score hs ON hs.facility_id = f.id"
         " LEFT JOIN mv_facility_latest_snapshot snap ON snap.facility_id = f.id"
         " LEFT JOIN alert_ct al ON al.facility_id = f.id"
+        " LEFT JOIN doc_ct dc ON dc.facility_id = f.id"
     )
 
     total = (await db.execute(sa_text(cte + "SELECT count(*)" + joins + where_sql), params)).scalar() or 0
@@ -713,7 +716,8 @@ async def browse_facilities(
         sa_text(
             cte
             + "SELECT f.id, f.code, f.name, f.facility_type, d.name AS district_name, s.name AS state_name, "
-              "hs.overall_score, hs.status, hs.medicine_score, snap.doctors_present, snap.opd_count, "
+              "hs.overall_score, hs.status, hs.medicine_score, "
+              "COALESCE(dc.n, snap.doctors_present) AS doctors, snap.opd_count, "
               "snap.beds_occupied, f.bed_capacity, al.c"
             + joins + where_sql
             + " ORDER BY hs.overall_score ASC NULLS LAST, f.name LIMIT :lim OFFSET :off"
