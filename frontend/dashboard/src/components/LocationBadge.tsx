@@ -1,42 +1,58 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { getNearestFacilities } from '../api/facilities'
+import { useQueryClient } from '@tanstack/react-query'
+import { apiClient } from '../api/client'
 import { useAuthStore } from '../stores/authStore'
 
-// Shows the admin's auto-detected location (district, state) in the top bar,
-// derived from device GPS → nearest facility's district. Silent no-op if the
-// browser denies/lacks geolocation — the nav simply doesn't show a badge.
+// Shows the admin's CURRENT working scope (district, state) and lets them update
+// it to their real GPS location on click. Always visible (falls back to the
+// assigned district/state), so the user always sees which state/district the
+// dashboard is scoped to — and can retap if auto-detect was blocked.
 export default function LocationBadge() {
   const { t } = useTranslation()
-  const token = useAuthStore((s) => s.token)
-  const [label, setLabel] = useState<string | null>(null)
+  const qc = useQueryClient()
+  const { districtName, stateName, setLocation } = useAuthStore()
   const [locating, setLocating] = useState(false)
+  const [error, setError] = useState(false)
 
-  useEffect(() => {
-    if (!navigator.geolocation || !token) return
-    setLocating(true)
+  const detect = () => {
+    if (!navigator.geolocation) { setError(true); return }
+    setLocating(true); setError(false)
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         try {
-          const near = await getNearestFacilities(pos.coords.latitude, pos.coords.longitude, 1)
-          const n = near[0]
-          if (n?.district_name) setLabel(n.district_name)
-          else if (n?.name) setLabel(n.name)
-        } catch { /* keep silent */ } finally { setLocating(false) }
+          const { data } = await apiClient.post('/auth/me/location', {
+            lat: pos.coords.latitude, lng: pos.coords.longitude,
+          })
+          setLocation({
+            districtId: data.district_id, districtName: data.district_name,
+            stateId: data.state_id, stateName: data.state_name,
+          })
+          qc.invalidateQueries()  // re-scope dashboard to the new location
+        } catch { setError(true) } finally { setLocating(false) }
       },
-      () => setLocating(false),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 },
+      () => { setError(true); setLocating(false) },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 },
     )
-  }, [token])
+  }
 
-  if (!label && !locating) return null
+  const label = locating
+    ? t('location.locating', 'Locating…')
+    : districtName
+      ? `${districtName}${stateName ? `, ${stateName}` : ''}`
+      : t('location.detect', 'Use my location')
 
   return (
-    <span
-      title={t('location.detected', 'Your detected location')}
-      className="flex items-center gap-1 rounded-full bg-teal-50 text-teal-700 text-xs font-semibold px-2.5 py-1 max-w-[16rem] truncate"
+    <button
+      onClick={detect}
+      title={error
+        ? t('location.blocked', 'Location blocked — enable location for this site, then tap again')
+        : t('location.tap', 'Tap to set the dashboard to your current location')}
+      className={`flex items-center gap-1 rounded-full text-xs font-semibold px-2.5 py-1 max-w-[18rem] truncate transition-colors ${
+        error ? 'bg-red-50 text-red-600' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'
+      }`}
     >
-      📍 {locating && !label ? t('location.locating', 'Locating…') : label}
-    </span>
+      📍 {label}
+    </button>
   )
 }
