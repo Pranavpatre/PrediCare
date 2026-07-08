@@ -41,7 +41,10 @@ jobs:
 
     services:
       postgres:
-        image: timescale/timescaledb:latest-pg16
+        # timescaledb-ha bundles BOTH TimescaleDB and PostGIS; the plain
+        # timescaledb image lacks PostGIS, so migration 0001's
+        # `CREATE EXTENSION postgis` failed (FeatureNotSupportedError).
+        image: timescale/timescaledb-ha:pg16
         env:
           POSTGRES_USER: smarthealth
           POSTGRES_PASSWORD: smarthealth_test
