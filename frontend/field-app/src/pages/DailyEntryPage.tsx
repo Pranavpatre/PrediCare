@@ -18,11 +18,6 @@ export default function DailyEntryPage() {
   const { facilityId, userId, token, languagePref } = useAuthStore()
   const today = format(new Date(), 'yyyy-MM-dd')
 
-  // Geofenced check-in state
-  const [checkingIn, setCheckingIn] = useState(false)
-  const [checkInStatus, setCheckInStatus] = useState<{ within: boolean; distance: number } | null>(null)
-  const [checkInError, setCheckInError] = useState<string | null>(null)
-
   // Bed matrix + test checklist state
   const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
   const authHdr = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
@@ -166,48 +161,6 @@ export default function DailyEntryPage() {
     refreshPending()
   }
 
-  const handleGeoCheckIn = () => {
-    setCheckInError(null)
-    setCheckInStatus(null)
-    if (!navigator.geolocation) {
-      setCheckInError(t('checkin.errorGeoUnavailable'))
-      return
-    }
-    if (!navigator.onLine) {
-      setCheckInError(t('checkin.errorNeedsNetwork'))
-      return
-    }
-    setCheckingIn(true)
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        try {
-          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-          const res = await fetch(`${API_URL}/api/v1/attendance/check-in`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-              facility_id: facilityId,
-            }),
-          })
-          if (!res.ok) throw new Error(t('checkin.errorFailed'))
-          const data = await res.json()
-          setCheckInStatus({ within: data.within_geofence, distance: Math.round(data.distance_m ?? 0) })
-        } catch (e) {
-          setCheckInError(e instanceof Error ? e.message : t('checkin.errorFailed'))
-        } finally {
-          setCheckingIn(false)
-        }
-      },
-      (err) => {
-        setCheckInError(err.message || t('checkin.errorNoLocation'))
-        setCheckingIn(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    )
-  }
-
   const handleSync = async () => {
     if (!navigator.onLine) {
       setSyncMsg(t('sync.noInternet'))
@@ -315,34 +268,6 @@ export default function DailyEntryPage() {
           className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
           {tallySaved ? t('footfall.saved') : `${t('footfall.save')} (${tally.general + tally.maternal + tally.emergency})`}
         </button>
-      </section>
-
-      {/* Geofenced Check-In Section — placed top-right on wide screens */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-3 lg:row-start-1">
-        <h2 className="text-base font-semibold text-gray-800">{t('checkin.title')}</h2>
-        <p className="text-xs text-gray-500 -mt-2">{t('checkin.hint')}</p>
-        <button
-          onClick={handleGeoCheckIn}
-          disabled={checkingIn}
-          className="w-full py-3 rounded-xl bg-teal-600 text-white font-semibold disabled:opacity-40 hover:bg-teal-700 transition-colors"
-        >
-          {checkingIn ? t('checkin.locating') : `📍 ${t('checkin.btn')}`}
-        </button>
-        {checkInStatus && (
-          <div
-            className={clsx(
-              'rounded-xl p-3 text-sm font-medium',
-              checkInStatus.within
-                ? 'bg-green-50 text-green-700 border border-green-200'
-                : 'bg-red-50 text-red-700 border border-red-200',
-            )}
-          >
-            {checkInStatus.within
-              ? `✓ ${t('checkin.within', { distance: checkInStatus.distance })}`
-              : `⚠ ${t('checkin.outside', { distance: checkInStatus.distance })}`}
-          </div>
-        )}
-        {checkInError && <p className="text-sm text-red-500">{checkInError}</p>}
       </section>
 
       {/* Bed Matrix Section */}

@@ -2,7 +2,15 @@ import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthStore } from '../stores/authStore'
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000'
+// Prefer an explicit VITE_WS_URL; otherwise derive the websocket origin from
+// the API URL (http→ws, https→wss) so production doesn't fall back to
+// ws://localhost:8000 (which fails on every page). Falls back to localhost only
+// in local dev where neither var is set.
+const WS_URL =
+  import.meta.env.VITE_WS_URL ||
+  (import.meta.env.VITE_API_URL
+    ? String(import.meta.env.VITE_API_URL).replace(/^http/, 'ws')
+    : 'ws://localhost:8000')
 
 export function useAlertWebSocket() {
   const queryClient = useQueryClient()

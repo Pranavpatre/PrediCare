@@ -28,6 +28,41 @@ def _sync_db_url() -> str:
     return url.replace("postgresql+asyncpg://", "postgresql://")
 
 
+def _ensure_latest_matviews(cur) -> None:
+    """Create the latest-score / latest-snapshot materialized views + their
+    unique indexes if missing. These back the read-path queries (dashboard,
+    facilities, assistant) so they don't scan the full time-series tables.
+    Idempotent — safe to call before every REFRESH. Runs with autocommit."""
+    cur.execute(
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_facility_latest_score AS
+        SELECT DISTINCT ON (facility_id)
+            facility_id, time, status, overall_score,
+            medicine_score, doctor_score, bed_score,
+            wait_time_score, diagnostics_score
+        FROM facility_health_scores
+        ORDER BY facility_id, time DESC
+        """
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS mv_fls_pk "
+        "ON mv_facility_latest_score(facility_id)"
+    )
+    cur.execute(
+        """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS mv_facility_latest_snapshot AS
+        SELECT DISTINCT ON (facility_id)
+            facility_id, doctors_present, opd_count, beds_occupied, time
+        FROM daily_snapshots
+        ORDER BY facility_id, time DESC
+        """
+    )
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS mv_fls_snap_pk "
+        "ON mv_facility_latest_snapshot(facility_id)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Facility health scores
 # ---------------------------------------------------------------------------
@@ -230,6 +265,23 @@ def run_health_scores(self) -> dict:
                 continue
 
         conn.commit()
+
+        # Refresh the read-path materialized views so the dashboard / facilities
+        # / assistant queries (which join these instead of scanning the full
+        # facility_health_scores + daily_snapshots tables) see fresh values.
+        # CONCURRENTLY can't run inside a transaction, so use autocommit; a
+        # refresh failure must never fail the scoring run.
+        try:
+            conn.autocommit = True
+            rcur = conn.cursor()
+            _ensure_latest_matviews(rcur)
+            rcur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_facility_latest_score")
+            rcur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY mv_facility_latest_snapshot")
+            rcur.close()
+            log.info("latest_matviews_refreshed")
+        except Exception as refresh_err:
+            log.error("latest_matviews_refresh_failed", error=str(refresh_err))
+
         cur.close()
         conn.close()
 

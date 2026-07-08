@@ -15,11 +15,11 @@ Geofence: check-in GPS is compared to the facility's PostGIS location; if within
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -236,3 +236,40 @@ async def facility_attendance(
         total_today=counts.total or 0,
         days_since_last_present=days_since,
     )
+
+
+class AttendanceDay(BaseModel):
+    date: date
+    present: int
+    total: int
+
+
+@router.get("/facility/{facility_id}/history", response_model=list[AttendanceDay])
+async def facility_attendance_history(
+    facility_id: uuid.UUID,
+    days: int = Query(14, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    current_user: Any = Depends(_staff_plus),
+) -> list[AttendanceDay]:
+    """Date-wise doctor availability for a facility over the last N days —
+    on-site (geofenced) present count vs total check-ins per day. Powers the
+    admin 'doctor availability' view."""
+    cutoff = datetime.now(timezone.utc).date() - timedelta(days=days)
+    rows = (
+        await db.execute(
+            sa_text(
+                """
+                SELECT attendance_date AS d,
+                       count(*) FILTER (WHERE within_geofence) AS present,
+                       count(*) AS total
+                FROM staff_attendance
+                WHERE facility_id = :fid
+                  AND attendance_date >= :cutoff
+                GROUP BY attendance_date
+                ORDER BY attendance_date DESC
+                """
+            ),
+            {"fid": str(facility_id), "cutoff": cutoff},
+        )
+    ).all()
+    return [AttendanceDay(date=r.d, present=int(r.present), total=int(r.total)) for r in rows]

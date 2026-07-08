@@ -32,7 +32,10 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <nav className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-6">
-          <span className="font-bold text-teal-700 text-lg tracking-tight">PrediCare</span>
+          <span className="flex items-center gap-2">
+            <img src="/favicon.svg" alt="" className="w-7 h-7 rounded-md" />
+            <span className="font-bold text-teal-700 text-lg tracking-tight">PrediCare</span>
+          </span>
           {isPhcAdmin ? (
             // PHC_ADMIN is scoped to one facility — the district-wide
             // dashboard/facilities/redistribution pages aren't queryable
@@ -42,13 +45,15 @@ export default function Layout() {
             <>
               <NavLink to="/dashboard" className={navClass}>{t('nav.dashboard')}</NavLink>
               <NavLink to="/facilities" className={navClass}>{t('nav.facilities')}</NavLink>
+              <NavLink to="/stock" className={navClass}>{t('nav.stock')}</NavLink>
               <NavLink to="/redistribution" className={navClass}>{t('nav.redistribution')}</NavLink>
             </>
           )}
           {canRefer && <NavLink to="/refer" className={navClass}>{t('nav.refer')}</NavLink>}
           {canRetrieve && <NavLink to="/referrals" className={navClass}>{t('nav.referrals')}</NavLink>}
           <NavLink to="/assistant" className={navClass}>{t('nav.assistant')}</NavLink>
-          <NavLink to="/diagnostics" className={navClass}>Diagnostics</NavLink>
+          {/* Diagnostics is an internal/dev tool — reachable directly at
+              /diagnostics but intentionally not shown in the end-user nav. */}
         </div>
         <div className="flex items-center gap-3">
           {/* Language switcher */}
