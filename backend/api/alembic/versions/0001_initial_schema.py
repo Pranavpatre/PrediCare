@@ -58,64 +58,45 @@ def upgrade() -> None:
     # ------------------------------------------------------------------
     # ENUM types
     # ------------------------------------------------------------------
-    op.execute(
-        """
-        CREATE TYPE facility_type AS ENUM (
-            'PHC', 'CHC', 'SUB_CENTRE', 'DISTRICT_HOSPITAL'
+    # Idempotent enum creation: timescaledb operations later in this migration
+    # can force intermediate COMMITs, so the migration must be safe to re-enter
+    # (a bare CREATE TYPE would raise "type already exists" on retry). Guard
+    # each with a pg_type existence check.
+    def _enum(name: str, values: str) -> None:
+        op.execute(
+            f"""
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = '{name}') THEN
+                    CREATE TYPE {name} AS ENUM ({values});
+                END IF;
+            END $$;
+            """
         )
-        """
+
+    _enum("facility_type", "'PHC', 'CHC', 'SUB_CENTRE', 'DISTRICT_HOSPITAL'")
+    _enum(
+        "user_role",
+        "'FIELD_WORKER', 'PHC_ADMIN', 'DISTRICT_OFFICER', 'STATE_ADMIN', 'SUPERADMIN'",
     )
-    op.execute(
-        """
-        CREATE TYPE user_role AS ENUM (
-            'FIELD_WORKER', 'PHC_ADMIN', 'DISTRICT_OFFICER',
-            'STATE_ADMIN', 'SUPERADMIN'
-        )
-        """
+    _enum(
+        "medicine_category",
+        "'ESSENTIAL', 'ANTIBIOTIC', 'VACCINE', 'ORS', 'ANALGESIC', "
+        "'ANTIDIABETIC', 'ANTIHYPERTENSIVE', 'ANTIMALARIAL', "
+        "'DIAGNOSTICS_KIT', 'REAGENT', 'EQUIPMENT', 'OTHER'",
     )
-    op.execute(
-        """
-        CREATE TYPE medicine_category AS ENUM (
-            'ESSENTIAL', 'ANTIBIOTIC', 'VACCINE', 'ORS', 'ANALGESIC',
-            'ANTIDIABETIC', 'ANTIHYPERTENSIVE', 'ANTIMALARIAL',
-            'DIAGNOSTICS_KIT', 'REAGENT', 'EQUIPMENT', 'OTHER'
-        )
-        """
+    _enum(
+        "prediction_type",
+        "'STOCKOUT', 'FOOTFALL', 'DIAGNOSTIC_SHORTAGE', 'ANOMALY', 'HEALTH_SCORE'",
     )
-    op.execute(
-        """
-        CREATE TYPE prediction_type AS ENUM (
-            'STOCKOUT', 'FOOTFALL', 'DIAGNOSTIC_SHORTAGE',
-            'ANOMALY', 'HEALTH_SCORE'
-        )
-        """
+    _enum(
+        "transfer_status",
+        "'PENDING', 'APPROVED', 'DEFERRED', 'IN_TRANSIT', 'COMPLETED', 'CANCELLED'",
     )
-    op.execute(
-        """
-        CREATE TYPE transfer_status AS ENUM (
-            'PENDING', 'APPROVED', 'DEFERRED', 'IN_TRANSIT',
-            'COMPLETED', 'CANCELLED'
-        )
-        """
-    )
-    op.execute(
-        """
-        CREATE TYPE alert_severity AS ENUM ('INFO', 'WARNING', 'CRITICAL')
-        """
-    )
-    op.execute(
-        """
-        CREATE TYPE alert_status AS ENUM (
-            'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SNOOZED'
-        )
-        """
-    )
-    op.execute(
-        """
-        CREATE TYPE procurement_status AS ENUM (
-            'FLAGGED', 'REVIEWED', 'ORDERED', 'DELIVERED', 'CLOSED'
-        )
-        """
+    _enum("alert_severity", "'INFO', 'WARNING', 'CRITICAL'")
+    _enum("alert_status", "'OPEN', 'ACKNOWLEDGED', 'RESOLVED', 'SNOOZED'")
+    _enum(
+        "procurement_status",
+        "'FLAGGED', 'REVIEWED', 'ORDERED', 'DELIVERED', 'CLOSED'",
     )
 
     # ------------------------------------------------------------------
