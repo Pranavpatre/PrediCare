@@ -12,6 +12,7 @@ celery_app = Celery(
     include=[
         "tasks.prediction_tasks",
         "tasks.scoring_tasks",
+        "tasks.demand_tasks",
         "tasks.notification_tasks",
         "tasks.retraining_tasks",
     ],
@@ -29,6 +30,7 @@ celery_app.conf.update(
     task_routes={
         "tasks.prediction_tasks.*": {"queue": "predictions"},
         "tasks.scoring_tasks.*": {"queue": "scoring"},
+        "tasks.demand_tasks.*": {"queue": "scoring"},
         "tasks.notification_tasks.*": {"queue": "notifications"},
         "tasks.retraining_tasks.*": {"queue": "default"},
     },
@@ -46,6 +48,13 @@ celery_app.conf.update(
         "health-scores-update": {
             "task": "tasks.scoring_tasks.run_health_scores",
             "schedule": 21600,  # every 6 hours
+            "options": {"queue": "scoring"},
+        },
+        "demand-model-weekly": {
+            "task": "tasks.demand_tasks.run_demand_model",
+            # Weekly, Monday 03:00 IST — recompute per-facility demand profiles
+            # and dynamic reorder levels before the week's scoring runs.
+            "schedule": crontab(hour=3, minute=0, day_of_week=1),
             "options": {"queue": "scoring"},
         },
         "model-drift-check": {

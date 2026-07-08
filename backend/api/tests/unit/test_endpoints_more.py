@@ -139,3 +139,31 @@ async def test_doctors_roster_and_attendance(ctx):
     )
     assert mark.status_code == 200
     assert any(d["id"] == did and d["present_today"] for d in mark.json())
+
+
+# ── Demand model surfacing (dynamic reorder + demand profile) ─────────────────
+
+@pytest.mark.anyio
+async def test_demand_profile_endpoint(ctx):
+    client, tk, ids = ctx
+    fid = ids["facility"]
+    r = await client.get(
+        f"/api/v1/facilities/{fid}/demand-profile", headers=H(tk["fw"])
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert "has_profile" in body and "basis" in body
+
+
+@pytest.mark.anyio
+async def test_stock_endpoint_exposes_demand_fields(ctx):
+    client, tk, ids = ctx
+    fid = ids["facility"]
+    r = await client.get(f"/api/v1/medicines/stock/{fid}", headers=H(tk["fw"]))
+    assert r.status_code == 200
+    rows = r.json()
+    assert isinstance(rows, list)
+    if rows:
+        # new fields present on every row (may be False/None until demand model runs)
+        assert "demand_based" in rows[0]
+        assert "required_stock" in rows[0]

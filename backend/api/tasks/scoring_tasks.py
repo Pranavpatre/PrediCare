@@ -112,14 +112,20 @@ def run_health_scores(self) -> dict:
             try:
                 # ── Medicine score ───────────────────────────────────────────
                 # Coverage = min(current_stock / reorder_level, 1.0) per medicine,
-                # averaged across all active medicines.
+                # averaged across all active medicines. The reorder level is the
+                # facility's DEMAND-DERIVED dynamic level (facility_medicine_
+                # requirements, computed by run_demand_model from local footfall)
+                # when present, falling back to the medicine's global reorder_level
+                # for facilities that don't yet have a demand profile.
                 cur.execute(
                     """
                     SELECT
                         AVG(
                             LEAST(
                                 COALESCE(sb.total_stock, 0)::float
-                                    / NULLIF(m.reorder_level, 0),
+                                    / NULLIF(
+                                        COALESCE(fmr.dynamic_reorder_level,
+                                                 m.reorder_level), 0),
                                 1.0
                             )
                         ) AS coverage
@@ -130,9 +136,11 @@ def run_health_scores(self) -> dict:
                         WHERE facility_id = %s AND expiry_date > CURRENT_DATE
                         GROUP BY medicine_id
                     ) sb ON sb.medicine_id = m.id
+                    LEFT JOIN facility_medicine_requirements fmr
+                        ON fmr.medicine_id = m.id AND fmr.facility_id = %s
                     WHERE m.is_active = TRUE
                     """,
-                    (fac_id,),
+                    (fac_id, fac_id),
                 )
                 row = cur.fetchone()
                 medicine_score = round(float(row["coverage"] or 0.5) * 100, 1)

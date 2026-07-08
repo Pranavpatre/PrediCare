@@ -68,3 +68,42 @@ def test_run_single_facility_prediction():
         conn.close()
     result = run_single_facility_prediction.apply(args=[fac, med]).get()
     assert isinstance(result, dict)
+
+
+# ── Demand model (district-customized reorder levels) ─────────────────────────
+
+def test_run_demand_model():
+    from tasks.demand_tasks import run_demand_model
+    result = _run(run_demand_model)
+    assert isinstance(result, dict)
+    assert "profiles" in result and "requirements" in result
+    # every seeded facility should get a profile row (even if basis=default)
+    assert result["profiles"] >= 1
+
+
+def test_demand_then_health_scores_still_score():
+    """Health scores must still compute after the demand model populates the
+    facility_medicine_requirements the scorer now LEFT JOINs against."""
+    from tasks.demand_tasks import run_demand_model
+    from tasks.scoring_tasks import run_health_scores
+    _run(run_demand_model)
+    result = _run(run_health_scores)
+    assert result.get("scored", 0) >= 1
+
+
+def test_demand_usage_rates_seeded():
+    import os
+    import psycopg2
+    dsn = os.environ["DATABASE_URL"].replace("postgresql+asyncpg://", "postgresql://")
+    conn = psycopg2.connect(dsn)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT count(*) FROM medicine_usage_rates")
+        assert cur.fetchone()[0] >= 1
+        # profiles table is populated by the task
+        from tasks.demand_tasks import run_demand_model
+        run_demand_model.apply().get()
+        cur.execute("SELECT count(*) FROM facility_demand_profiles")
+        assert cur.fetchone()[0] >= 1
+    finally:
+        conn.close()

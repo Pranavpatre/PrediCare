@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
   getFacilityStock, getFacilityTests, getFacilityBeds, getDoctors,
+  getDemandProfile,
 } from '../api/resources'
 import { browseFacilities, getStates, getDistricts } from '../api/facilities'
 import { formatNumber } from '../lib/format'
@@ -54,6 +55,7 @@ export default function StockPage() {
   const { data: tests = [] } = useQuery({ queryKey: ['fac-tests', facilityId], queryFn: () => getFacilityTests(facilityId), enabled })
   const { data: beds = [] } = useQuery({ queryKey: ['fac-beds', facilityId], queryFn: () => getFacilityBeds(facilityId), enabled })
   const { data: doctors = [] } = useQuery({ queryKey: ['fac-doctors', facilityId], queryFn: () => getDoctors(facilityId), enabled })
+  const { data: demand } = useQuery({ queryKey: ['fac-demand', facilityId], queryFn: () => getDemandProfile(facilityId), enabled })
 
   const categories = useMemo(
     () => ['ALL', ...Array.from(new Set(stock.map((s) => s.category))).sort()],
@@ -111,6 +113,29 @@ export default function StockPage() {
           <Kpi label={t('stockview.beds_occupied')} value={beds.reduce((a, b) => a + b.occupied_beds, 0) + '/' + beds.reduce((a, b) => a + b.total_beds, 0)} />
         </div>
 
+        {/* Demand basis — why this facility's reorder levels are what they are */}
+        {demand?.has_profile && demand.basis !== 'default' && (
+          <div className="bg-teal-50 border border-teal-100 rounded-xl p-4">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="font-semibold text-teal-800 text-sm">{t('stockview.demand_basis', 'Demand basis (district-customized)')}</h2>
+              <span className="text-xs text-teal-600">
+                {demand.basis === 'district_fallback'
+                  ? t('stockview.basis_district', 'district estimate')
+                  : t('stockview.basis_facility', `from ${demand.sample_days} days of this facility's footfall`)}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <DemandStat label={t('stockview.avg_footfall', 'Avg daily footfall')} value={formatNumber(Math.round(demand.mean_daily_footfall))} />
+              <DemandStat label={t('stockview.worst_footfall', 'Worst-case (P95)')} value={formatNumber(Math.round(demand.p95_daily_footfall))} />
+              <DemandStat label={t('stockview.district_share', 'Share of district')} value={`${Math.round(demand.district_footfall_share * 100)}%`} />
+              <DemandStat label={t('stockview.load_vs_peers', 'Load vs district peers')} value={`${demand.population_factor.toFixed(2)}×`} />
+            </div>
+            <p className="text-xs text-teal-700/70 mt-2">
+              {t('stockview.demand_note', 'Reorder levels below are sized to this facility’s worst-case demand × supplier lead time × a safety buffer — not a flat district default.')}
+            </p>
+          </div>
+        )}
+
         {/* Medicine stock table */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4 space-y-3">
           <h2 className="font-semibold text-gray-800">{t('stockview.medicine_stock')}</h2>
@@ -135,6 +160,7 @@ export default function StockPage() {
                     <th className="px-3 py-2">{t('stockview.col_category')}</th>
                     <th className="px-3 py-2 text-right">{t('stockview.col_stock')}</th>
                     <th className="px-3 py-2 text-right">{t('stockview.col_reorder')}</th>
+                    <th className="px-3 py-2 text-right">{t('stockview.col_required', 'Target')}</th>
                     <th className="px-3 py-2">{t('stockview.col_status')}</th>
                   </tr>
                 </thead>
@@ -144,11 +170,15 @@ export default function StockPage() {
                       <td className="px-3 py-2 font-medium text-gray-900">{r.name}</td>
                       <td className="px-3 py-2 text-gray-500">{r.category}</td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-800">{formatNumber(r.current_stock)} <span className="text-xs text-gray-400">{r.unit}</span></td>
-                      <td className="px-3 py-2 text-right text-gray-500">{formatNumber(r.reorder_level)}</td>
+                      <td className="px-3 py-2 text-right text-gray-500">
+                        {formatNumber(r.reorder_level)}
+                        {r.demand_based && <span className="ml-1 text-[10px] text-teal-600" title={t('stockview.demand_based_hint', 'Sized to this facility’s demand')}>◈</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right text-gray-400">{r.required_stock != null ? formatNumber(r.required_stock) : '—'}</td>
                       <td className="px-3 py-2"><span className={`text-xs font-bold px-2 py-0.5 rounded-full ${STATUS_STYLE[r.status]}`}>{t(`stockview.status_${r.status.toLowerCase()}`)}</span></td>
                     </tr>
                   ))}
-                  {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">{t('facilities.empty')}</td></tr>}
+                  {rows.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">{t('facilities.empty')}</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -207,6 +237,15 @@ export default function StockPage() {
         </div>
       </>
       )}
+    </div>
+  )
+}
+
+function DemandStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs text-teal-700/70">{label}</p>
+      <p className="text-lg font-bold text-teal-800">{value}</p>
     </div>
   )
 }

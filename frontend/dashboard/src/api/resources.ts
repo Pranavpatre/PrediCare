@@ -12,10 +12,36 @@ export interface StockRow {
   reorder_level: number
   current_stock: number
   status: 'OK' | 'WATCH' | 'LOW'
+  // Present when the reorder level came from the district-customized demand
+  // model rather than the global default.
+  demand_based?: boolean
+  required_stock?: number | null
+  expected_daily_demand?: number | null
 }
 
 export const getFacilityStock = async (facilityId: string) => {
   const { data } = await apiClient.get<StockRow[]>(`/medicines/stock/${facilityId}`)
+  return data
+}
+
+// How a facility's dynamic reorder levels were derived (own footfall, worst-case
+// load, position vs district peers). Powers the "Demand basis" panel.
+export interface DemandProfile {
+  facility_id: string
+  has_profile: boolean
+  sample_days: number
+  mean_daily_footfall: number
+  p95_daily_footfall: number
+  district_footfall_share: number
+  population_factor: number
+  basis: 'facility' | 'district_fallback' | 'default'
+  computed_at: string | null
+}
+
+export const getDemandProfile = async (facilityId: string) => {
+  const { data } = await apiClient.get<DemandProfile>(
+    `/facilities/${facilityId}/demand-profile`,
+  )
   return data
 }
 

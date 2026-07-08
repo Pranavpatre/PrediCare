@@ -1351,3 +1351,62 @@ async def update_stock(
         below_reorder=new_total < medicine.reorder_level,
         batches=batch_details,
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Demand profile — how the district-customized requirement was derived
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DemandProfileResponse(BaseModel):
+    """Per-facility demand basis behind the dynamic reorder levels. Surfaces the
+    'why' of a facility's stock targets: its own footfall, worst-case load, and
+    where it sits relative to district peers."""
+    facility_id: uuid.UUID
+    has_profile: bool
+    sample_days: int = 0
+    mean_daily_footfall: float = 0.0
+    p95_daily_footfall: float = 0.0
+    district_footfall_share: float = 0.0
+    population_factor: float = 1.0
+    basis: str = "default"  # facility | district_fallback | default
+    computed_at: datetime | None = None
+
+
+@router.get("/{facility_id}/demand-profile", response_model=DemandProfileResponse)
+async def facility_demand_profile(
+    facility_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(_field_plus),
+) -> DemandProfileResponse:
+    """Return the demand profile that drives this facility's dynamic reorder
+    levels. Returns has_profile=False (with defaults) when run_demand_model has
+    not yet produced one — e.g. a brand-new facility with no footfall history."""
+    row = (
+        await db.execute(
+            sa_text(
+                """
+                SELECT sample_days, mean_daily_footfall, p95_daily_footfall,
+                       district_footfall_share, population_factor, basis,
+                       computed_at
+                FROM facility_demand_profiles
+                WHERE facility_id = :fid
+                """
+            ),
+            {"fid": str(facility_id)},
+        )
+    ).mappings().first()
+
+    if not row:
+        return DemandProfileResponse(facility_id=facility_id, has_profile=False)
+
+    return DemandProfileResponse(
+        facility_id=facility_id,
+        has_profile=True,
+        sample_days=int(row["sample_days"]),
+        mean_daily_footfall=float(row["mean_daily_footfall"]),
+        p95_daily_footfall=float(row["p95_daily_footfall"]),
+        district_footfall_share=float(row["district_footfall_share"]),
+        population_factor=float(row["population_factor"]),
+        basis=row["basis"],
+        computed_at=row["computed_at"],
+    )
