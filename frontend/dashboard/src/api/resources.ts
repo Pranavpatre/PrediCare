@@ -58,3 +58,15 @@ export const getAttendanceHistory = async (facilityId: string, days = 14) => {
   )
   return data
 }
+
+export interface DoctorRow {
+  id: string
+  name: string
+  specialty: string | null
+  present_today: boolean
+}
+
+export const getDoctors = async (facilityId: string) => {
+  const { data } = await apiClient.get<DoctorRow[]>(`/doctors/facility/${facilityId}`)
+  return data
+}

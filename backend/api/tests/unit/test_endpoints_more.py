@@ -118,3 +118,24 @@ async def test_referral_search(ctx):
     client, tk, _ = ctx
     r = await client.get("/api/v1/referrals/search?q=Flow", headers=H(tk["do"]))
     assert r.status_code in (200, 400, 422)  # search path deprecated/strict params
+
+
+@pytest.mark.anyio
+async def test_doctors_roster_and_attendance(ctx):
+    """List → add → mark attendance for the facility doctor roster."""
+    client, tk, ids = ctx
+    fid = ids["facility"]
+    lst = await client.get(f"/api/v1/doctors/facility/{fid}", headers=H(tk["fw"]))
+    assert lst.status_code == 200
+    add = await client.post(
+        f"/api/v1/doctors/facility/{fid}", headers=H(tk["fw"]),
+        json={"name": "Dr. Test Roster", "specialty": "General"},
+    )
+    assert add.status_code in (200, 201)
+    did = add.json()["id"]
+    mark = await client.put(
+        f"/api/v1/doctors/facility/{fid}/attendance", headers=H(tk["fw"]),
+        json=[{"doctor_id": did, "present": True}],
+    )
+    assert mark.status_code == 200
+    assert any(d["id"] == did and d["present_today"] for d in mark.json())

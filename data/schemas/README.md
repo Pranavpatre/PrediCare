@@ -15,6 +15,7 @@ deployed with (Cloud SQL / local) and what CI builds the test database from.
 | `007_district_hmis_metrics.sql` | District HMIS metrics |
 | `008_latest_score_matviews.sql` | `mv_facility_latest_score` / `mv_facility_latest_snapshot` read-path matviews |
 | `009_referrals_and_abdm.sql` | Referral tables (patients/referrals/access-log/visit-notes) + ABDM columns |
+| `010_doctors.sql` | Per-facility doctor roster + daily per-doctor attendance |
 
 ## Applying
 
@@ -23,7 +24,7 @@ deployed with (Cloud SQL / local) and what CI builds the test database from.
 for f in 001_core 003_state_infrastructure 004_staff_attendance \
          005_district_footfall 006_beds_and_tests \
          007_district_hmis_metrics 008_latest_score_matviews \
-         009_referrals_and_abdm; do
+         009_referrals_and_abdm 010_doctors; do
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "data/schemas/$f.sql"
 done
 # demo seed (optional)

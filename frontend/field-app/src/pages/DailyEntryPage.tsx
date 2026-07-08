@@ -7,105 +7,66 @@ import { useVoiceInput, parseSpokenNumber, VOICE_LANG_MAP } from '../hooks/useVo
 import { syncPendingData, queueLedger } from '../sync/syncService'
 import InfoNote from '../components/InfoNote'
 import VoiceRecordingBanner from '../components/VoiceRecordingBanner'
+import DoctorAttendance from '../components/DoctorAttendance'
 import clsx from 'clsx'
 
 function generateClientId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+// Daily Entry = the manual per-day inputs a field worker records: patient count,
+// footfall tally by type, and per-doctor attendance. Facility resources (bed
+// matrix, test availability, medicine stock) live in the Stock tab.
 export default function DailyEntryPage() {
   const { t } = useTranslation()
-  const { facilityId, userId, token, languagePref } = useAuthStore()
+  const { facilityId, userId, languagePref } = useAuthStore()
   const today = format(new Date(), 'yyyy-MM-dd')
-
-  // Bed matrix + test checklist state
-  const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
-  const authHdr = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
-  const [beds, setBeds] = useState<{ bed_type: string; total_beds: number; occupied_beds: number }[]>([])
-  const [bedsSaved, setBedsSaved] = useState(false)
-  const [tests, setTests] = useState<{ test_id: number; test_name: string | null; available: boolean }[]>([])
-  const [testsSaved, setTestsSaved] = useState(false)
 
   // Rapid footfall tally (general / maternal / emergency)
   const [tally, setTally] = useState({ general: 0, maternal: 0, emergency: 0 })
   const [tallySaved, setTallySaved] = useState(false)
   const bump = (k: 'general' | 'maternal' | 'emergency', d: number) =>
-    setTally((t) => ({ ...t, [k]: Math.max(0, t[k] + d) }))
+    setTally((prev) => ({ ...prev, [k]: Math.max(0, prev[k] + d) }))
   const saveTally = async () => {
     if (!facilityId) return
-    await queueLedger('footfall', facilityId, tally)   // offline-first: queue + sync if online
+    await queueLedger('footfall', facilityId, tally)
     setTallySaved(true); setTimeout(() => setTallySaved(false), 3000)
+    if (navigator.onLine) await syncPendingData()
     refreshPending()
   }
 
   useEffect(() => {
-    if (!facilityId || !token) return
-    fetch(`${API}/api/v1/ledger/beds/${facilityId}`, { headers: authHdr })
-      .then((r) => r.ok ? r.json() : null).then((d) => d && setBeds(d.beds)).catch(() => {})
-    fetch(`${API}/api/v1/ledger/tests/${facilityId}`, { headers: authHdr })
-      .then((r) => r.ok ? r.json() : null).then((d) => d && setTests(d.tests)).catch(() => {})
-    fetch(`${API}/api/v1/ledger/footfall/${facilityId}`, { headers: authHdr })
-      .then((r) => r.ok ? r.json() : null)
+    if (!facilityId) return
+    const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const { token } = useAuthStore.getState()
+    fetch(`${API}/api/v1/ledger/footfall/${facilityId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
       .then((d) => d && setTally({ general: d.general, maternal: d.maternal, emergency: d.emergency }))
       .catch(() => {})
-  }, [facilityId, token])
+  }, [facilityId])
 
-  const setOccupied = (bedType: string, delta: number) =>
-    setBeds((prev) => prev.map((b) => b.bed_type === bedType
-      ? { ...b, occupied_beds: Math.max(0, Math.min(b.total_beds, b.occupied_beds + delta)) } : b))
-
-  const saveBeds = async () => {
-    if (!facilityId) return
-    await queueLedger('beds', facilityId, beds)
-    setBedsSaved(true); setTimeout(() => setBedsSaved(false), 3000)
-    refreshPending()
-  }
-
-  const toggleTest = (testId: number) =>
-    setTests((prev) => prev.map((t) => t.test_id === testId ? { ...t, available: !t.available } : t))
-
-  const saveTests = async () => {
-    if (!facilityId) return
-    await queueLedger('tests', facilityId, tests)
-    setTestsSaved(true); setTimeout(() => setTestsSaved(false), 3000)
-    refreshPending()
-  }
-
-  // Patient count state
-  const [patientCount, setPatientCount] = useState<string>('')
+  // Patient count
+  const [patientCount, setPatientCount] = useState('')
   const [footfallSaved, setFootfallSaved] = useState(false)
   const [footfallError, setFootfallError] = useState<string | null>(null)
 
-  // Doctor attendance state — starts unset (neither button highlighted) so
-  // the UI never implies attendance was recorded before the worker actually
-  // taps something.
-  const [doctorPresent, setDoctorPresent] = useState<boolean | null>(null)
-  const [attendanceSaved, setAttendanceSaved] = useState(false)
-
-  // Pending count
   const [pendingCount, setPendingCount] = useState(0)
-
-  // Sync
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
 
   const { isListening, transcript, error: voiceError, startListening, stopListening, reset: resetVoice } =
     useVoiceInput(VOICE_LANG_MAP[languagePref] || 'en-IN')
 
-  // Parse voice transcript into patient count
   useEffect(() => {
     if (!transcript) return
     const parsed = parseSpokenNumber(transcript)
-    if (parsed !== null) {
-      setPatientCount(String(parsed))
-      setFootfallError(null)
-    } else {
-      setFootfallError(t('patient.errorParse', { transcript }))
-    }
+    if (parsed !== null) { setPatientCount(String(parsed)); setFootfallError(null) }
+    else setFootfallError(t('patient.errorParse', { transcript }))
     resetVoice()
-  }, [transcript, resetVoice])
+  }, [transcript, resetVoice]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load pending count on mount and after saves
   const refreshPending = async () => {
     const [f, a, l] = await Promise.all([
       db.pendingFootfall.filter((r) => !r.synced).count(),
@@ -114,74 +75,37 @@ export default function DailyEntryPage() {
     ])
     setPendingCount(f + a + l)
   }
-
   useEffect(() => { refreshPending() }, [])
 
   const handleSaveFootfall = async () => {
     if (!facilityId || !userId) return
     const count = parseInt(patientCount, 10)
-    if (isNaN(count) || count < 0) {
-      setFootfallError(t('patient.errorInvalid'))
-      return
-    }
+    if (isNaN(count) || count < 0) { setFootfallError(t('patient.errorInvalid')); return }
     setFootfallError(null)
     await db.pendingFootfall.add({
-      facility_id: facilityId,
-      date: today,
-      footfall_count: count,
-      recorded_at: new Date().toISOString(),
-      client_id: generateClientId(),
-      synced: false,
+      facility_id: facilityId, date: today, footfall_count: count,
+      recorded_at: new Date().toISOString(), client_id: generateClientId(), synced: false,
     })
-    setFootfallSaved(true)
-    setTimeout(() => setFootfallSaved(false), 3000)
+    setFootfallSaved(true); setTimeout(() => setFootfallSaved(false), 3000)
     setPatientCount('')
-    // Offline-first: always queue locally, then flush immediately if online —
-    // same contract as queueLedger (beds/tests/tally), so this doesn't sit as
-    // "pending" until a manual Sync Now tap like the rest of the screen.
-    if (navigator.onLine) await syncPendingData()
-    refreshPending()
-  }
-
-  const handleToggleAttendance = async (present: boolean) => {
-    if (!facilityId || !userId) return
-    setDoctorPresent(present)
-    await db.pendingAttendance.add({
-      facility_id: facilityId,
-      user_id: userId,
-      date: today,
-      present,
-      recorded_at: new Date().toISOString(),
-      client_id: generateClientId(),
-      synced: false,
-    })
-    setAttendanceSaved(true)
-    setTimeout(() => setAttendanceSaved(false), 3000)
     if (navigator.onLine) await syncPendingData()
     refreshPending()
   }
 
   const handleSync = async () => {
     if (!navigator.onLine) {
-      setSyncMsg(t('sync.noInternet'))
-      setTimeout(() => setSyncMsg(null), 3000)
-      return
+      setSyncMsg(t('sync.noInternet')); setTimeout(() => setSyncMsg(null), 3000); return
     }
     setSyncing(true)
     const result = await syncPendingData()
     setSyncing(false)
-    setSyncMsg(
-      t('sync.result', {
-        synced: result.synced,
-        errorsSuffix: result.errors > 0 ? `, ${result.errors} failed` : '',
-      }),
-    )
+    setSyncMsg(t('sync.result', { synced: result.synced, errorsSuffix: result.errors > 0 ? `, ${result.errors} failed` : '' }))
     setTimeout(() => setSyncMsg(null), 4000)
     refreshPending()
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col w-full max-w-6xl mx-auto">
+    <div className="min-h-screen bg-gray-50 w-full max-w-2xl mx-auto">
       <VoiceRecordingBanner show={isListening} label={t('voice.recording')} />
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4">
@@ -196,186 +120,62 @@ export default function DailyEntryPage() {
         </div>
       </div>
 
-      {/* All sections are visible at once, spread across the page in a grid
-          instead of stacked in one narrow centered column — reduces total
-          scroll on wide screens and keeps related actions spatially grouped. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-4 pb-20 items-start">
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-span-2 lg:row-start-1">
-        <h2 className="text-base font-semibold text-gray-800">{t('patient.title')}</h2>
-        <InfoNote>{t('info.patient')}</InfoNote>
-
-        <div className="flex gap-3 items-center">
-          <input
-            type="number"
-            min="0"
-            value={patientCount}
-            onChange={(e) => { setPatientCount(e.target.value); setFootfallError(null) }}
-            placeholder="0"
-            className="flex-1 text-3xl font-bold text-center border-2 border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:border-teal-500 transition-colors"
-          />
-          <button
-            onPointerDown={startListening}
-            onPointerUp={stopListening}
-            className={clsx(
-              'w-14 h-14 rounded-full flex items-center justify-center text-2xl shadow transition-all',
-              isListening
-                ? 'bg-red-500 text-white scale-110 animate-pulse'
-                : 'bg-teal-600 text-white hover:bg-teal-700',
-            )}
-            title={isListening ? 'Listening…' : 'Hold to speak'}
-            aria-label="Voice input"
-          >
-            {isListening ? '⏹' : '🎤'}
-          </button>
-        </div>
-
-        {voiceError && <p className="text-sm text-red-500">{voiceError}</p>}
-        {footfallError && <p className="text-sm text-red-500">{footfallError}</p>}
-        {isListening && (
-          <p className="text-sm text-blue-500 animate-pulse">{t('patient.listening')}</p>
-        )}
-
-        <button
-          onClick={handleSaveFootfall}
-          disabled={!patientCount}
-          className="w-full py-3 rounded-xl bg-teal-600 text-white font-semibold disabled:opacity-40 hover:bg-teal-700 transition-colors"
-        >
-          {footfallSaved ? t('tests.saved') : t('patient.save')}
-        </button>
-      </section>
-
-      {/* Rapid Footfall Tally */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-1 lg:row-start-2">
-        <h2 className="text-base font-semibold text-gray-800">{t('footfall.title')}</h2>
-        <InfoNote>{t('info.footfall')}</InfoNote>
-        {([
-          ['general', t('footfall.general')],
-          ['maternal', t('footfall.maternal')],
-          ['emergency', t('footfall.emergency')],
-        ] as const).map(([key, label]) => (
-          <div key={key} className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-800">{label}</span>
-            <div className="flex items-center gap-2">
-              <button onClick={() => bump(key, -1)}
-                className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg">−</button>
-              <span className="w-10 text-center font-bold text-gray-900 text-lg">{tally[key]}</span>
-              <button onClick={() => bump(key, 1)}
-                className="w-9 h-9 rounded-lg bg-teal-100 text-teal-700 font-bold text-lg">+</button>
-            </div>
+      <div className="p-4 pb-20 space-y-4">
+        {/* Patient count */}
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <h2 className="text-base font-semibold text-gray-800">{t('patient.title')}</h2>
+          <InfoNote>{t('info.patient')}</InfoNote>
+          <div className="flex gap-3 items-center">
+            <input type="number" min="0" value={patientCount}
+              onChange={(e) => { setPatientCount(e.target.value); setFootfallError(null) }}
+              placeholder="0"
+              className="flex-1 text-3xl font-bold text-center border-2 border-gray-200 rounded-xl py-3 px-4 focus:outline-none focus:border-teal-500 transition-colors" />
+            <button onPointerDown={startListening} onPointerUp={stopListening}
+              className={clsx('w-14 h-14 rounded-full flex items-center justify-center text-2xl shadow transition-all',
+                isListening ? 'bg-red-500 text-white scale-110 animate-pulse' : 'bg-teal-600 text-white hover:bg-teal-700')}
+              aria-label="Voice input">
+              {isListening ? '⏹' : '🎤'}
+            </button>
           </div>
-        ))}
-        <button onClick={saveTally}
-          className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
-          {tallySaved ? t('footfall.saved') : `${t('footfall.save')} (${tally.general + tally.maternal + tally.emergency})`}
-        </button>
-      </section>
+          {voiceError && <p className="text-sm text-red-500">{voiceError}</p>}
+          {footfallError && <p className="text-sm text-red-500">{footfallError}</p>}
+          <button onClick={handleSaveFootfall} disabled={!patientCount}
+            className="w-full py-3 rounded-xl bg-teal-600 text-white font-semibold disabled:opacity-40 hover:bg-teal-700 transition-colors">
+            {footfallSaved ? t('tests.saved') : t('patient.save')}
+          </button>
+        </section>
 
-      {/* Bed Matrix Section */}
-      {beds.length > 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-2 lg:row-start-2">
-          <h2 className="text-base font-semibold text-gray-800">{t('beds.title')}</h2>
-          <InfoNote>{t('info.beds')}</InfoNote>
-          {beds.map((b) => (
-            <div key={b.bed_type} className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-gray-800">{b.bed_type}</p>
-                <p className="text-xs text-gray-400">{b.occupied_beds} / {b.total_beds} occupied</p>
-              </div>
+        {/* Footfall tally */}
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4">
+          <h2 className="text-base font-semibold text-gray-800">{t('footfall.title')}</h2>
+          <InfoNote>{t('info.footfall')}</InfoNote>
+          {([['general', t('footfall.general')], ['maternal', t('footfall.maternal')], ['emergency', t('footfall.emergency')]] as const).map(([key, label]) => (
+            <div key={key} className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-800">{label}</span>
               <div className="flex items-center gap-2">
-                <button onClick={() => setOccupied(b.bed_type, -1)}
-                  className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg disabled:opacity-30"
-                  disabled={b.total_beds === 0}>−</button>
-                <span className="w-8 text-center font-bold text-gray-900">{b.occupied_beds}</span>
-                <button onClick={() => setOccupied(b.bed_type, 1)}
-                  className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg disabled:opacity-30"
-                  disabled={b.total_beds === 0}>+</button>
+                <button onClick={() => bump(key, -1)} className="w-9 h-9 rounded-lg bg-gray-100 text-gray-700 font-bold text-lg">−</button>
+                <span className="w-10 text-center font-bold text-gray-900 text-lg">{tally[key]}</span>
+                <button onClick={() => bump(key, 1)} className="w-9 h-9 rounded-lg bg-teal-100 text-teal-700 font-bold text-lg">+</button>
               </div>
             </div>
           ))}
-          <button onClick={saveBeds}
-            className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
-            {bedsSaved ? t('beds.saved') : t('beds.save')}
+          <button onClick={saveTally} className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
+            {tallySaved ? t('footfall.saved') : `${t('footfall.save')} (${tally.general + tally.maternal + tally.emergency})`}
           </button>
         </section>
-      )}
-      {beds.length === 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center lg:col-start-2 lg:row-start-2">
-          <p className="text-gray-400 text-sm">{t('beds.title')}…</p>
-        </section>
-      )}
 
-      {/* Doctor Attendance Section — after bed matrix, kept toward the right */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-4 lg:col-start-3 lg:row-start-2">
-        <h2 className="text-base font-semibold text-gray-800">{t('attendance.title')}</h2>
-        <InfoNote>{t('info.attendance')}</InfoNote>
-        <div className="flex gap-3">
-          <button
-            onClick={() => handleToggleAttendance(true)}
-            className={clsx(
-              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
-              doctorPresent === true
-                ? 'bg-green-600 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-            )}
-          >
-            {t('attendance.present')}
-          </button>
-          <button
-            onClick={() => handleToggleAttendance(false)}
-            className={clsx(
-              'flex-1 py-3 rounded-xl font-semibold text-sm transition-all',
-              doctorPresent === false
-                ? 'bg-red-500 text-white shadow-sm'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200',
-            )}
-          >
-            {t('attendance.absent')}
-          </button>
-        </div>
-        {attendanceSaved && (
-          <p className="text-sm text-green-600 font-medium">{t('attendance.saved')}</p>
-        )}
-      </section>
+        {/* Per-doctor attendance */}
+        <DoctorAttendance />
 
-      {/* Test Availability Checklist */}
-      {tests.length > 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3 lg:col-span-2 lg:row-start-3">
-          <h2 className="text-base font-semibold text-gray-800">{t('tests.title')}</h2>
-          <InfoNote>{t('info.tests')}</InfoNote>
-          {tests.map((tst) => (
-            <div key={tst.test_id} className="flex items-center justify-between">
-              <span className="text-sm text-gray-800">{tst.test_name}</span>
-              <button onClick={() => toggleTest(tst.test_id)}
-                className={clsx('px-4 py-1.5 rounded-full text-xs font-bold transition-all',
-                  tst.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-                {tst.available ? t('tests.available') : t('tests.unavailable')}
-              </button>
-            </div>
-          ))}
-          <button onClick={saveTests}
-            className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
-            {testsSaved ? t('tests.saved') : t('tests.save')}
+        {/* Sync */}
+        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-2">
+          <InfoNote>{t('info.sync')}</InfoNote>
+          <button onClick={handleSync} disabled={syncing || pendingCount === 0}
+            className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors">
+            {syncing ? t('sync.syncing') : `${t('sync.now')}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
           </button>
+          {syncMsg && <p className="text-sm text-gray-600 mt-2 text-center">{syncMsg}</p>}
         </section>
-      )}
-      {tests.length === 0 && (
-        <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center lg:col-span-2 lg:row-start-3">
-          <p className="text-gray-400 text-sm">{t('tests.title')}…</p>
-        </section>
-      )}
-
-      {/* Sync Section */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-2 lg:col-start-3 lg:row-start-3">
-        <InfoNote>{t('info.sync')}</InfoNote>
-        <button
-          onClick={handleSync}
-          disabled={syncing || pendingCount === 0}
-          className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold disabled:opacity-40 hover:bg-blue-700 transition-colors"
-        >
-          {syncing ? t('sync.syncing') : `${t('sync.now')}${pendingCount > 0 ? ` (${pendingCount})` : ''}`}
-        </button>
-        {syncMsg && <p className="text-sm text-gray-600 mt-2 text-center">{syncMsg}</p>}
-      </section>
       </div>
     </div>
   )

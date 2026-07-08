@@ -58,6 +58,8 @@ class DistrictContext:
     # [{facility, medicine, days_until_stockout, confidence}]
     recent_predictions: list[dict] = field(default_factory=list)
     top_risks: list[str] = field(default_factory=list)
+    # [{name, critical_alerts, open_alerts}] — ranked by open CRITICAL alerts
+    facilities_by_critical_alerts: list[dict] = field(default_factory=list)
 
 
 class HealthAssistant:
@@ -221,6 +223,17 @@ class HealthAssistant:
                 )
         else:
             lines.append("STOCKOUT PREDICTIONS (< 3 days): None")
+
+        # Facilities ranked by open CRITICAL alerts (answers "which facility has
+        # the most critical alerts")
+        if context.facilities_by_critical_alerts:
+            lines.append("")
+            lines.append("FACILITIES BY OPEN CRITICAL ALERTS (highest first):")
+            for fac in context.facilities_by_critical_alerts:
+                lines.append(
+                    f"  - {fac.get('name')}: {fac.get('critical_alerts', 0)} critical"
+                    f", {fac.get('open_alerts', 0)} open total"
+                )
 
         # Top risks
         if context.top_risks:

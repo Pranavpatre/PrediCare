@@ -489,10 +489,6 @@ async def nearest_facilities(
         await db.execute(
             sa_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
-                    FROM facility_health_scores ORDER BY facility_id, time DESC
-                )
                 SELECT f.id, f.code, f.name, f.facility_type,
                        ST_Y(f.location) AS lat, ST_X(f.location) AS lng,
                        ST_Distance(
@@ -503,7 +499,7 @@ async def nearest_facilities(
                        d.id AS district_id, d.state_id AS state_id
                 FROM facilities f
                 JOIN districts d ON d.id = f.district_id
-                LEFT JOIN latest l ON l.facility_id = f.id
+                LEFT JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 {where}
                 ORDER BY f.location <-> ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)
                 LIMIT :lim

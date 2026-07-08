@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
-  getFacilityStock, getFacilityTests, getFacilityBeds, getAttendanceHistory,
+  getFacilityStock, getFacilityTests, getFacilityBeds, getDoctors,
 } from '../api/resources'
 import { browseFacilities, getStates, getDistricts } from '../api/facilities'
 import { formatNumber } from '../lib/format'
@@ -53,7 +53,7 @@ export default function StockPage() {
   })
   const { data: tests = [] } = useQuery({ queryKey: ['fac-tests', facilityId], queryFn: () => getFacilityTests(facilityId), enabled })
   const { data: beds = [] } = useQuery({ queryKey: ['fac-beds', facilityId], queryFn: () => getFacilityBeds(facilityId), enabled })
-  const { data: attendance = [] } = useQuery({ queryKey: ['fac-att', facilityId], queryFn: () => getAttendanceHistory(facilityId, 14), enabled })
+  const { data: doctors = [] } = useQuery({ queryKey: ['fac-doctors', facilityId], queryFn: () => getDoctors(facilityId), enabled })
 
   const categories = useMemo(
     () => ['ALL', ...Array.from(new Set(stock.map((s) => s.category))).sort()],
@@ -179,18 +179,25 @@ export default function StockPage() {
             </div>
           </div>
 
-          {/* Doctor availability (date-wise) */}
+          {/* Doctor availability (per-doctor roster, today) */}
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
-            <h2 className="font-semibold text-gray-800 mb-3">{t('stockview.doctor_availability')}</h2>
-            {attendance.length === 0 ? (
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-gray-800">{t('stockview.doctor_availability')}</h2>
+              {doctors.length > 0 && (
+                <span className="text-xs text-gray-400">
+                  {doctors.filter((d) => d.present_today).length}/{doctors.length} {t('stockview.present').toLowerCase()}
+                </span>
+              )}
+            </div>
+            {doctors.length === 0 ? (
               <p className="text-gray-400 text-sm">{t('stockview.no_attendance')}</p>
             ) : (
               <div className="space-y-1.5">
-                {attendance.map((d) => (
-                  <div key={d.date} className="flex items-center justify-between text-sm">
-                    <span className="text-gray-600">{new Date(d.date).toLocaleDateString()}</span>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${d.present > 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {d.present > 0 ? t('stockview.present') : t('stockview.absent')} ({d.present}/{d.total})
+                {doctors.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-700">{d.name}{d.specialty ? ` · ${d.specialty}` : ''}</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${d.present_today ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {d.present_today ? t('stockview.present') : t('stockview.absent')}
                     </span>
                   </div>
                 ))}

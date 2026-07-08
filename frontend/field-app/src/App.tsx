@@ -7,7 +7,7 @@ import { syncPendingData } from './sync/syncService'
 import OfflineBanner from './components/OfflineBanner'
 import BottomNav from './components/BottomNav'
 import HelpModal from './components/HelpModal'
-import CheckInButton from './components/CheckInButton'
+import LocationBadge from './components/LocationBadge'
 import LoginPage from './pages/LoginPage'
 import DailyEntryPage from './pages/DailyEntryPage'
 import StockEntryPage from './pages/StockEntryPage'
@@ -40,7 +40,7 @@ function TopBar() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <CheckInButton />
+            <LocationBadge />
             <Link
               to="/help"
               aria-label={t('help.navLabel')}

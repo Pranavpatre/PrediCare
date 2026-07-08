@@ -335,6 +335,40 @@ async def query_assistant(
     top_risks: list[str] = [row["title"] for row in risk_rows]
 
     # ------------------------------------------------------------------
+    # 8b. Facilities ranked by open CRITICAL alert count (+ total open)
+    #     — answers "which facility has the most critical alerts".
+    # ------------------------------------------------------------------
+    crit_rank_rows = (
+        await db.execute(
+            sqla_text(
+                f"""
+                SELECT f.name AS name,
+                       count(*) FILTER (WHERE a.severity = 'CRITICAL') AS critical_alerts,
+                       count(*) AS open_alerts
+                FROM alerts a
+                JOIN facilities f ON f.id = a.facility_id
+                WHERE a.status = 'OPEN'
+                  {_dcond}
+                GROUP BY f.name
+                HAVING count(*) FILTER (WHERE a.severity = 'CRITICAL') > 0
+                ORDER BY critical_alerts DESC, open_alerts DESC
+                LIMIT 10
+                """
+            ),
+            params,
+        )
+    ).mappings().all()
+
+    facilities_by_critical_alerts: list[dict] = [
+        {
+            "name": row["name"],
+            "critical_alerts": int(row["critical_alerts"]),
+            "open_alerts": int(row["open_alerts"]),
+        }
+        for row in crit_rank_rows
+    ]
+
+    # ------------------------------------------------------------------
     # Assemble context and call the assistant
     # ------------------------------------------------------------------
     # Lazy-import the ML assistant module so a missing ml-models dir or the
@@ -359,6 +393,7 @@ async def query_assistant(
         critical_facilities=critical_facilities,
         recent_predictions=recent_predictions,
         top_risks=top_risks,
+        facilities_by_critical_alerts=facilities_by_critical_alerts,
     )
 
     from config import get_settings

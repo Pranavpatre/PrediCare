@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next'
 export const HELP_SECTIONS: { icon: string; titleKey: string; descKey: string }[] = [
   { icon: '📋', titleKey: 'patient.title', descKey: 'info.patient' },
   { icon: '🔢', titleKey: 'footfall.title', descKey: 'info.footfall' },
-  { icon: '📍', titleKey: 'checkin.title', descKey: 'checkin.hint' },
-  { icon: '🩺', titleKey: 'attendance.title', descKey: 'info.attendance' },
+  { icon: '📍', titleKey: 'location.at', descKey: 'location.help' },
+  { icon: '🩺', titleKey: 'attendance.title', descKey: 'attendance.rosterHint' },
   { icon: '🛏️', titleKey: 'beds.title', descKey: 'info.beds' },
   { icon: '🧪', titleKey: 'tests.title', descKey: 'info.tests' },
   { icon: '💊', titleKey: 'stock.title', descKey: 'info.stock' },

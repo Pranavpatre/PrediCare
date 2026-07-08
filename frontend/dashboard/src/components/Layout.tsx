@@ -40,18 +40,18 @@ export default function Layout() {
             // PHC_ADMIN is scoped to one facility — the district-wide
             // dashboard/facilities/redistribution pages aren't queryable
             // for them, so only show their facility view + the assistant.
-            <NavLink to="/my-facility" className={navClass}>{t('nav.myFacility')}</NavLink>
+            <NavLink to="/my-facility" className={navClass}><span aria-hidden>🏥</span> {t('nav.myFacility')}</NavLink>
           ) : (
             <>
-              <NavLink to="/dashboard" className={navClass}>{t('nav.dashboard')}</NavLink>
-              <NavLink to="/facilities" className={navClass}>{t('nav.facilities')}</NavLink>
-              <NavLink to="/stock" className={navClass}>{t('nav.stock')}</NavLink>
-              <NavLink to="/redistribution" className={navClass}>{t('nav.redistribution')}</NavLink>
+              <NavLink to="/dashboard" className={navClass}><span aria-hidden>📊</span> {t('nav.dashboard')}</NavLink>
+              <NavLink to="/facilities" className={navClass}><span aria-hidden>🏥</span> {t('nav.facilities')}</NavLink>
+              <NavLink to="/stock" className={navClass}><span aria-hidden>💊</span> {t('nav.stock')}</NavLink>
+              <NavLink to="/redistribution" className={navClass}><span aria-hidden>🔄</span> {t('nav.redistribution')}</NavLink>
             </>
           )}
-          {canRefer && <NavLink to="/refer" className={navClass}>{t('nav.refer')}</NavLink>}
-          {canRetrieve && <NavLink to="/referrals" className={navClass}>{t('nav.referrals')}</NavLink>}
-          <NavLink to="/assistant" className={navClass}>{t('nav.assistant')}</NavLink>
+          {canRefer && <NavLink to="/refer" className={navClass}><span aria-hidden>📤</span> {t('nav.refer')}</NavLink>}
+          {canRetrieve && <NavLink to="/referrals" className={navClass}><span aria-hidden>📥</span> {t('nav.referrals')}</NavLink>}
+          <NavLink to="/assistant" className={navClass}><span aria-hidden>🤖</span> {t('nav.assistant')}</NavLink>
           {/* Diagnostics is an internal/dev tool — reachable directly at
               /diagnostics but intentionally not shown in the end-user nav. */}
         </div>
