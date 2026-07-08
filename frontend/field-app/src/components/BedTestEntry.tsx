@@ -18,7 +18,7 @@ export default function BedTestEntry({ section }: { section: 'beds' | 'tests' })
   const facilityId = useAuthStore((s) => s.facilityId ?? s.activeFacilityId)
   const authHdr = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
 
-  const [beds, setBeds] = useState<{ bed_type: string; total_beds: number; occupied_beds: number; occupied_until: string | null }[]>([])
+  const [beds, setBeds] = useState<{ bed_type: string; total_beds: number; occupied_beds: number; occupied_until_dates: string[] }[]>([])
   const [bedsSaved, setBedsSaved] = useState(false)
   const [tests, setTests] = useState<{ test_id: number; test_name: string | null; available: boolean }[]>([])
   const [testsSaved, setTestsSaved] = useState(false)
@@ -42,13 +42,23 @@ export default function BedTestEntry({ section }: { section: 'beds' | 'tests' })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facilityId, token, section])
 
+  // Keep the per-bed date list length in sync with the occupied count.
   const setOccupied = (bedType: string, delta: number) =>
-    setBeds((prev) => prev.map((b) => b.bed_type === bedType
-      ? { ...b, occupied_beds: Math.max(0, Math.min(b.total_beds, b.occupied_beds + delta)) } : b))
+    setBeds((prev) => prev.map((b) => {
+      if (b.bed_type !== bedType) return b
+      const occ = Math.max(0, Math.min(b.total_beds, b.occupied_beds + delta))
+      const dates = (b.occupied_until_dates || []).slice(0, occ)
+      while (dates.length < occ) dates.push('')
+      return { ...b, occupied_beds: occ, occupied_until_dates: dates }
+    }))
 
-  const setOccupiedUntil = (bedType: string, value: string) =>
-    setBeds((prev) => prev.map((b) => b.bed_type === bedType
-      ? { ...b, occupied_until: value || null } : b))
+  const setBedDate = (bedType: string, idx: number, value: string) =>
+    setBeds((prev) => prev.map((b) => {
+      if (b.bed_type !== bedType) return b
+      const dates = [...(b.occupied_until_dates || [])]
+      dates[idx] = value
+      return { ...b, occupied_until_dates: dates }
+    }))
 
   const saveBeds = async () => {
     if (!facilityId) return
@@ -90,12 +100,17 @@ export default function BedTestEntry({ section }: { section: 'beds' | 'tests' })
               </div>
             </div>
             {b.occupied_beds > 0 && (
-              <label className="flex items-center justify-between gap-2 text-xs text-gray-500">
-                {t('beds.freeBy', 'Occupied until')}
-                <input type="date" value={b.occupied_until ?? ''}
-                  onChange={(e) => setOccupiedUntil(b.bed_type, e.target.value)}
-                  className="border-2 border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-teal-500" />
-              </label>
+              <div className="space-y-1">
+                <p className="text-xs text-gray-400">{t('beds.freeByEach', 'Free-up date per occupied bed')}</p>
+                {Array.from({ length: b.occupied_beds }).map((_, i) => (
+                  <label key={i} className="flex items-center justify-between gap-2 text-xs text-gray-500">
+                    {t('beds.bedN', 'Bed')} {i + 1}
+                    <input type="date" value={b.occupied_until_dates?.[i] ?? ''}
+                      onChange={(e) => setBedDate(b.bed_type, i, e.target.value)}
+                      className="border-2 border-gray-200 rounded-lg px-2 py-1 text-sm focus:outline-none focus:border-teal-500" />
+                  </label>
+                ))}
+              </div>
             )}
           </div>
         ))}

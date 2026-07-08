@@ -144,7 +144,7 @@ export default function StockEntryPage() {
       <VoiceRecordingBanner show={isListening} label={t('voice.recording')} />
       {/* Header */}
       <div className="flex items-center justify-between pt-2">
-        <h1 className="text-xl font-bold text-teal-600">{t('stock.title')}</h1>
+        <h1 className="text-xl font-bold text-teal-600">{t('stock.medicines_title', 'Medicines Availability')}</h1>
         {pendingCount > 0 && (
           <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
             {pendingCount} {t('daily.pending')}

@@ -13,6 +13,7 @@ PUT  /ledger/tests/{facility_id}  — upsert test availability
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime
 from typing import Any
@@ -42,7 +43,9 @@ class BedRow(BaseModel):
     bed_type: str
     total_beds: int
     occupied_beds: int
-    occupied_until: date | None = None  # expected date the occupied beds free up
+    occupied_until: date | None = None  # legacy single date (013); kept for compat
+    # Per-occupied-bed expected free dates (ISO strings), one per occupied bed.
+    occupied_until_dates: list[str] = []
 
 
 class BedMatrix(BaseModel):
@@ -69,6 +72,7 @@ async def get_beds(
             total_beds=by_type[bt].total_beds if bt in by_type else 0,
             occupied_beds=by_type[bt].occupied_beds if bt in by_type else 0,
             occupied_until=by_type[bt].occupied_until if bt in by_type else None,
+            occupied_until_dates=(by_type[bt].occupied_until_dates or []) if bt in by_type else [],
         )
         for bt in _BED_TYPES
     ]
@@ -89,18 +93,20 @@ async def put_beds(
         await db.execute(
             sa_text(
                 """
-                INSERT INTO facility_beds (facility_id, bed_type, total_beds, occupied_beds, occupied_until, updated_at)
-                VALUES (:fid, :bt, :tot, :occ, :until, NOW())
+                INSERT INTO facility_beds (facility_id, bed_type, total_beds, occupied_beds, occupied_until, occupied_until_dates, updated_at)
+                VALUES (:fid, :bt, :tot, :occ, :until, CAST(:dates AS jsonb), NOW())
                 ON CONFLICT (facility_id, bed_type) DO UPDATE SET
                     total_beds = EXCLUDED.total_beds,
                     occupied_beds = EXCLUDED.occupied_beds,
                     occupied_until = EXCLUDED.occupied_until,
+                    occupied_until_dates = EXCLUDED.occupied_until_dates,
                     updated_at = NOW()
                 """
             ),
             {"fid": str(facility_id), "bt": row.bed_type,
              "tot": max(row.total_beds, 0), "occ": max(row.occupied_beds, 0),
-             "until": row.occupied_until},
+             "until": row.occupied_until,
+             "dates": json.dumps(row.occupied_until_dates or [])},
         )
     log.info("beds_updated", facility_id=str(facility_id), user_id=str(current_user.id))
     return await get_beds(facility_id, db, current_user)

@@ -369,6 +369,56 @@ async def query_assistant(
     ]
 
     # ------------------------------------------------------------------
+    # 9. Actual medicine shortages — facilities whose current (non-expired)
+    #    stock is below the reorder level (demand-derived dynamic level when
+    #    available, else the medicine's global reorder). This is live stock, not
+    #    a prediction, so the assistant can answer "which facilities are short of
+    #    medicine X / facing shortages". National scope skips it (would scan all
+    #    facilities × medicines); high-level national answers don't need it.
+    # ------------------------------------------------------------------
+    if is_national:
+        shortage_rows = []
+    else:
+        shortage_rows = (
+            await db.execute(
+                sqla_text(
+                    f"""
+                    SELECT f.name AS facility, m.name AS medicine,
+                           COALESCE(SUM(sb.quantity) FILTER (
+                               WHERE sb.expiry_date > CURRENT_DATE), 0) AS stock,
+                           COALESCE(fmr.dynamic_reorder_level, m.reorder_level) AS reorder
+                    FROM facilities f
+                    JOIN medicines m ON m.is_active = TRUE
+                    LEFT JOIN stock_batches sb
+                           ON sb.facility_id = f.id AND sb.medicine_id = m.id
+                    LEFT JOIN facility_medicine_requirements fmr
+                           ON fmr.facility_id = f.id AND fmr.medicine_id = m.id
+                    WHERE 1=1 {_dcond}
+                    GROUP BY f.name, m.name, fmr.dynamic_reorder_level, m.reorder_level
+                    HAVING COALESCE(SUM(sb.quantity) FILTER (
+                               WHERE sb.expiry_date > CURRENT_DATE), 0)
+                           < COALESCE(fmr.dynamic_reorder_level, m.reorder_level)
+                    ORDER BY (COALESCE(fmr.dynamic_reorder_level, m.reorder_level)
+                              - COALESCE(SUM(sb.quantity) FILTER (
+                                  WHERE sb.expiry_date > CURRENT_DATE), 0)) DESC
+                    LIMIT 25
+                    """
+                ),
+                params,
+            )
+        ).mappings().all()
+
+    medicine_shortages: list[dict] = [
+        {
+            "facility": row["facility"],
+            "medicine": row["medicine"],
+            "stock": int(row["stock"]),
+            "reorder": int(row["reorder"]),
+        }
+        for row in shortage_rows
+    ]
+
+    # ------------------------------------------------------------------
     # Assemble context and call the assistant
     # ------------------------------------------------------------------
     # Lazy-import the ML assistant module so a missing ml-models dir or the
@@ -394,6 +444,7 @@ async def query_assistant(
         recent_predictions=recent_predictions,
         top_risks=top_risks,
         facilities_by_critical_alerts=facilities_by_critical_alerts,
+        medicine_shortages=medicine_shortages,
     )
 
     from config import get_settings

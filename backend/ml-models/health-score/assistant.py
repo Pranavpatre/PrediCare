@@ -60,6 +60,8 @@ class DistrictContext:
     top_risks: list[str] = field(default_factory=list)
     # [{name, critical_alerts, open_alerts}] — ranked by open CRITICAL alerts
     facilities_by_critical_alerts: list[dict] = field(default_factory=list)
+    # [{facility, medicine, stock, reorder}] — live stock below reorder level
+    medicine_shortages: list[dict] = field(default_factory=list)
 
 
 class HealthAssistant:
@@ -243,6 +245,18 @@ class HealthAssistant:
                     f"  - {fac.get('name')}: {fac.get('critical_alerts', 0)} critical"
                     f", {fac.get('open_alerts', 0)} open total"
                 )
+
+        # Live medicine shortages (stock below reorder level)
+        if context.medicine_shortages:
+            lines.append("")
+            lines.append("MEDICINE SHORTAGES (current stock below reorder level):")
+            for s in context.medicine_shortages:
+                lines.append(
+                    f"  - {s.get('facility')}: {s.get('medicine')} — "
+                    f"{s.get('stock', 0)} in stock vs {s.get('reorder', 0)} reorder"
+                )
+        else:
+            lines.append("MEDICINE SHORTAGES (stock below reorder): None")
 
         # Top risks
         if context.top_risks:
