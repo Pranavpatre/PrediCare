@@ -1,137 +1,102 @@
-# SmartHealth — AI-Powered District Health Operating System
+# PrediCare — AI District-Health Operating System
 
-> Predict operational failures at PHCs and CHCs before patients are affected.
-> Close the intervention loop in under 5 minutes.
+PrediCare is a live, predictive command center for India's primary health system.
+It turns fragmented, backward-looking health data into **foresight and
+coordination** — predicting medicine/test/bed shortages *before* they hit
+patients and helping district officers act on them.
 
----
+Built on real data from **52,339 health facilities** across India.
 
-## Problem
+## Live apps
 
-PHCs and CHCs track medicine stock, patient footfall, bed availability, doctor attendance,
-and diagnostic supplies on paper. District administrators discover failures 2–5 days after
-they occur — after patients are already affected.
+| App | URL | For | Login |
+|-----|-----|-----|-------|
+| **Admin dashboard** | https://predicare-dashboard.web.app | District / State / National officers | `9876543210` |
+| **Field-worker PWA** | https://predicare-field-app.web.app | PHC/CHC field workers (offline-first) | `9876500001` |
 
-## Solution
+Auth is **phone + OTP**. Dev OTP: **`000000`**. You see data for your scope: a
+national admin sees all-India; a district/state officer sees their own
+district/state (and can tap the 📍 badge to switch to their GPS location).
 
-A predictive control tower that:
-- Forecasts stockouts 48–72 hours ahead with confidence scores and reasoning
-- Predicts patient demand (footfall, staffing needs) using weather, disease, and calendar signals
-- Recommends inter-facility resource redistribution before shortages occur
-- Scores every facility 0–100 and surfaces the bottom-5 for district officer intervention
-- Closes the loop via WhatsApp one-tap approve/defer — no dashboard login required
-- Works offline and in 8+ regional languages with voice input
+## What it does
 
-## Judging Criteria Alignment
+**Admin dashboard**
+- Live national → state → district → facility health map, every facility scored.
+- Alerts feed (stockouts, zero-attendance, anomalies) + at-risk facility list.
+- **Planning tab** — pre-emptive actionables ~2 weeks ahead: which facilities will
+  run short of medicines/tests, how much to order and by when (downloadable
+  supplier CSV + on-demand email), plus a **doctor-redistribution plan** (move
+  surplus doctors to nearby short-staffed facilities) and bed/doctor capacity gaps.
+- **AI assistant** (Gemini) — plain-language Q&A on facilities, medicines,
+  doctors, tests, beds, alerts and plans, in 10 Indian languages, grounded only
+  on live district data.
+- State/UT bed infrastructure (real data.gov.in).
 
-| Criterion | How We Address It |
-|----------------------------|----------------------------------------------------------------|
-| Problem-solution fit | Replaces 5-day manual reporting cycle with 2-hour AI alerts |
-| AI/technical execution | 7 AI modules: forecasting, optimization, anomaly, LLM chat |
-| Deployability & scalability| Offline-first, 2G-ready, NIC Cloud compatible, Docker/K8s |
-| Inclusivity & accessibility| 8 regional languages, voice input, WhatsApp & SMS channels |
-| Impact potential | 60% fewer stockouts, 95% faster alerts, 10→10,000 PHC scaling |
-| Presentation & clarity | Live 3-min demo loop: alert → approve → resolve → score update |
+**Field-worker PWA** (offline-first)
+- Daily entry: patient count, footfall tally, per-doctor attendance, bed matrix
+  with a per-bed expected free-up date.
+- Stock tab: medicine availability + diagnostic test availability.
+- Patient referrals (create / retrieve by code or phone+OTP).
+- Queues offline and syncs automatically when back online.
 
----
+## Forecast & scoring modelling
 
-## Project Structure
+- **District-customized demand model** — per-facility required stock derived from
+  its own footfall: `worst-case (P95) daily footfall × per-patient usage × supplier
+  lead time × safety factor`, giving dynamic reorder levels (replacing a flat
+  global constant). Runs weekly.
+- **Seasonal + weather-aware planning** — demand is scaled by a disease-season
+  calendar (monsoon → ORS/antimalarial/fever, winter → respiratory, summer →
+  heat), the district's own historical footfall seasonality, and a live weather
+  blend (OpenWeather), so seasonal spikes are anticipated.
+- **District-relative health scoring** — facilities are graded against their
+  district peers (terciles) with absolute guardrails, plus a critical-alert
+  override.
+
+## Architecture
+
+- **Backend** — Python 3.11, FastAPI, async SQLAlchemy, Pydantic. PostgreSQL 16 +
+  PostGIS (geospatial, KNN nearest-facility), materialized views for fast reads.
+  Celery + Redis for scheduled jobs (health scoring, weekly demand model, anomaly
+  scan, daily planning digest).
+- **AI** — Google Gemini 2.5 Flash (grounded assistant, thinking disabled for
+  low latency) + speech-to-text / TTS.
+- **Frontend** — React 18 + TypeScript + Vite, TailwindCSS, TanStack Query,
+  Zustand, React Router, react-i18next (10 languages), Leaflet. Field app is a
+  PWA (vite-plugin-pwa + Dexie/IndexedDB).
+- **Infra** — Google Cloud Run (API + Celery worker/beat), Cloud SQL, Firebase
+  Hosting, Artifact Registry, Secret Manager, GitHub Actions CI/CD.
+
+## Repository layout
 
 ```
-SmartHealth/
-├── backend/
-│   ├── api/                 FastAPI REST + WebSocket endpoints
-│   ├── ml-models/
-│   │   ├── stockout/        Prophet + XGBoost time-series forecasting
-│   │   ├── footfall/        LightGBM demand prediction
-│   │   ├── redistribution/  OR-Tools optimization solver
-│   │   ├── health-score/    Composite facility scoring
-│   │   ├── anomaly/         Isolation Forest anomaly detection
-│   │   └── diagnostics/     Test/reagent availability forecasting
-│   ├── data-pipeline/       Ingestion, ETL, offline sync, retraining
-│   └── integrations/        e-Aushadhi, HMIS, ABDM, WhatsApp API
-├── frontend/
-│   ├── dashboard/           District admin React app (i18n, maps)
-│   └── field-app/           PHC worker PWA (offline-first, voice)
-├── infrastructure/
-│   ├── docker/              Dockerfiles and compose files
-│   └── k8s/                 Kubernetes manifests for production
-├── data/
-│   ├── schemas/             PostgreSQL + TimescaleDB migrations
-│   └── sample/              Synthetic demo data (10 PHCs, 90 days)
-├── docs/
-│   ├── architecture/        System design diagrams
-│   ├── requirements/        Feature specs and user stories
-│   └── presentation/        Demo script and pitch assets
-└── scripts/
-    └── seed.py              Cold-start data bootstrapper
+backend/api/            FastAPI app (routers, models, tasks, services)
+backend/ml-models/      health-score scorer + Gemini assistant
+frontend/dashboard/     Admin dashboard (React/Vite)
+frontend/field-app/     Field-worker PWA (React/Vite)
+data/schemas/           Numbered SQL schema files (source of truth, applied in order)
 ```
 
----
-
-## Tech Stack
-
-| Layer | Technology |
-|------------|-------------------------------------------------|
-| Backend | FastAPI (Python 3.11) |
-| Database | PostgreSQL 16 + TimescaleDB + PostGIS |
-| Cache | Redis 7 |
-| ML | Prophet, XGBoost, LightGBM, OR-Tools, sklearn |
-| LLM | Gemini 2.0 Flash (multilingual) / Llama 3.1 |
-| Frontend | React 18 + Tailwind + i18next |
-| Field App | React PWA (offline-first, IndexedDB sync) |
-| Messaging | Meta WhatsApp Cloud API + Twilio SMS |
-| Infra | Docker + Kubernetes (NIC Cloud compatible) |
-
----
-
-## Quick Start
+## Local development
 
 ```bash
-# 1. Start infrastructure
+# Backend + Postgres + Redis
 docker compose up -d
 
-# 2. Run migrations
-psql -U smarthealth smarthealth < data/schemas/001_core.sql
-psql -U smarthealth smarthealth < data/schemas/002_seed_demo.sql
-
-# 3. Start backend
-cd backend/api && pip install -r requirements.txt && uvicorn main:app --reload
-
-# 4. Start dashboard
+# Dashboard
 cd frontend/dashboard && npm install && npm run dev
+
+# Field app
+cd frontend/field-app && npm install && npm run dev
 ```
 
----
+The database schema is built from `data/schemas/*.sql` (numbered, applied in
+order) — this is the source of truth. CI applies them and runs the backend test
+suite (pytest), lint (ruff), and frontend builds on every push.
 
-## AI Modules
+## Deploy
 
-| Module | Model | Output |
-|--------|-------|--------|
-| Stockout Prediction | Prophet + XGBoost | Days until stockout, confidence, recommendation |
-| Diagnostics Shortage | Prophet + XGBoost | Reagent/kit runout forecast |
-| Footfall Forecast | LightGBM | Expected patients + staffing suggestion |
-| Redistribution | OR-Tools LP | Optimal transfer plan with cost savings |
-| Facility Health Score | Weighted composite | 0-100 score + status |
-| Anomaly Detection | Isolation Forest | Outbreak / data anomaly flags |
-| LLM Assistant | Gemini 2.0 Flash | Multilingual NL queries on live data |
-
----
-
-## Government Alignment
-
-- **e-Aushadhi**: sync existing drug inventory (augments, does not replace)
-- **HMIS/NHM**: pull facility metadata to avoid duplicate entry burden
-- **ABDM**: facility registry alignment for PHC/CHC identification
-- **DPDP Act 2023**: no individual PII stored, aggregated counts only, full audit log
-- **NIC Cloud**: Docker images deployable on MeitY-approved infrastructure
-
----
-
-## Demo Scenario (3 Minutes)
-
-1. Open district dashboard → PHC-12 shows RED
-2. Click → AI explains: "Insulin out in 2 days. Monsoon +20%, dengue trend +15%"
-3. System suggests: "Transfer 60 units from PHC-8. 4km. Saves ₹18,000."
-4. Admin taps Approve → PHC-8 worker gets WhatsApp in Hindi
-5. PHC-12 health score updates live: RED → YELLOW
-6. Voice demo: worker says "आज 180 मरीज आए" → dashboard updates
+- **Frontends** auto-deploy to Firebase Hosting on push to `main` touching
+  `frontend/**`.
+- **Backend** is built with Cloud Build and deployed to Cloud Run
+  (`predicare-api`, plus `predicare-celery-worker` / `predicare-celery-beat`).
