@@ -87,7 +87,8 @@ jobs:
         run: |
           for f in 001_core 003_state_infrastructure 004_staff_attendance \
                    005_district_footfall 006_beds_and_tests \
-                   007_district_hmis_metrics 008_latest_score_matviews; do
+                   007_district_hmis_metrics 008_latest_score_matviews \
+                   009_referrals_and_abdm; do
             echo "== applying $f.sql =="
             PGPASSWORD=smarthealth_test psql -h localhost -U smarthealth \
               -d smarthealth_test -v ON_ERROR_STOP=1 -f "data/schemas/$f.sql"
@@ -98,9 +99,8 @@ jobs:
           PGPASSWORD=smarthealth_test psql -h localhost -U smarthealth -d smarthealth_test -f data/schemas/002_seed_demo.sql
 
       - name: Run tests
-        # Coverage floor set to 40 to match the current suite (~43%); the 60%
-        # target was never met and kept CI red. Raise this as tests are added.
-        run: pytest --cov=. --cov-report=xml --cov-fail-under=40 -x
+        # Coverage floor 55 (suite runs at ~59%). Raise as tests are added.
+        run: pytest --cov=. --cov-report=xml --cov-fail-under=55 -x
         working-directory: backend/api
 
       - name: Upload coverage

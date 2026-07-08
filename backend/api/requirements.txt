@@ -6,7 +6,6 @@ python-multipart==0.0.9
 # Database
 asyncpg==0.29.0
 sqlalchemy[asyncio]==2.0.35
-alembic==1.13.3
 geoalchemy2==0.15.2
 
 # Validation & config
