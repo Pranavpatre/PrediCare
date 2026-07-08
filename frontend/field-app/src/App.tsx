@@ -14,6 +14,7 @@ import StockEntryPage from './pages/StockEntryPage'
 import NotificationsPage from './pages/NotificationsPage'
 import LogsPage from './pages/LogsPage'
 import HelpPage from './pages/HelpPage'
+import ReferralsPage from './pages/ReferralsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((s) => s.token)
@@ -111,6 +112,7 @@ export default function App() {
           <Route index element={<Navigate to="/daily" replace />} />
           <Route path="daily" element={<DailyEntryPage />} />
           <Route path="stock" element={<StockEntryPage />} />
+          <Route path="referrals" element={<ReferralsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="logs" element={<LogsPage />} />
           <Route path="help" element={<HelpPage />} />

@@ -39,6 +39,7 @@ const resources = {
       'sync.now': 'Sync Now',
       'nav.daily': 'Daily Entry',
       'nav.stock': 'Stock',
+      'nav.referrals': 'Referrals',
       'nav.alerts': 'Alerts',
       'nav.logs': 'Logs',
       'daily.title': 'Daily Entry',

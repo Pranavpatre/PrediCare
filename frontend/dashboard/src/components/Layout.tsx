@@ -20,8 +20,10 @@ export default function Layout() {
   const { t, i18n } = useTranslation()
   const { name, role, logout, startNavTour } = useAuthStore()
   const isPhcAdmin = role === 'PHC_ADMIN'
-  const canRefer = ['FIELD_WORKER', 'PHC_ADMIN', 'SUPERADMIN'].includes(role || '')
-  const canRetrieve = ['HOSPITAL_STAFF', 'DISTRICT_OFFICER', 'STATE_ADMIN', 'SUPERADMIN'].includes(role || '')
+  // Patient referral (create + retrieve) belongs in the field-worker app — that's
+  // where patients physically check in. Admins monitor, they don't refer, so the
+  // referral tabs are intentionally not in the dashboard nav. (Routes remain
+  // reachable by direct URL for support/debugging.)
 
   const navClass = ({ isActive }: { isActive: boolean }) =>
     `px-4 py-2 rounded-md text-sm font-medium transition-colors ${
@@ -49,8 +51,6 @@ export default function Layout() {
               <NavLink to="/redistribution" className={navClass}><span aria-hidden>🔄</span> {t('nav.redistribution')}</NavLink>
             </>
           )}
-          {canRefer && <NavLink to="/refer" className={navClass}><span aria-hidden>📤</span> {t('nav.refer')}</NavLink>}
-          {canRetrieve && <NavLink to="/referrals" className={navClass}><span aria-hidden>📥</span> {t('nav.referrals')}</NavLink>}
           <NavLink to="/assistant" className={navClass}><span aria-hidden>🤖</span> {t('nav.assistant')}</NavLink>
           {/* Diagnostics is an internal/dev tool — reachable directly at
               /diagnostics but intentionally not shown in the end-user nav. */}
