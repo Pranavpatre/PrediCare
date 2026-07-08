@@ -27,14 +27,7 @@ export default function StockEntryPage() {
   const [syncMsg, setSyncMsg] = useState<string | null>(null)
   const [voiceTarget, setVoiceTarget] = useState<number | null>(null)
   const [search, setSearch] = useState('')
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
-  const toggleCategory = (category: string) =>
-    setExpandedCategories((prev) => {
-      const next = new Set(prev)
-      if (next.has(category)) next.delete(category)
-      else next.add(category)
-      return next
-    })
+  const [catFilter, setCatFilter] = useState('ALL')
 
   const { isListening, transcript, error: voiceError, startListening, stopListening, reset: resetVoice } =
     useVoiceInput(VOICE_LANG_MAP[languagePref] || 'en-IN')
@@ -130,14 +123,11 @@ export default function StockEntryPage() {
     startListening()
   }
 
+  const allCategories = ['ALL', ...Array.from(new Set(medicines.map((m) => m.category))).sort()]
   const filtered = medicines.filter((m) =>
+    (catFilter === 'ALL' || m.category === catFilter) &&
     m.name.toLowerCase().includes(search.trim().toLowerCase()),
   )
-  const grouped = filtered.reduce<Record<string, MedicineRow[]>>((acc, m) => {
-    (acc[m.category] ||= []).push(m)
-    return acc
-  }, {})
-  const categories = Object.keys(grouped).sort()
 
   if (loading) {
     return (
@@ -176,102 +166,58 @@ export default function StockEntryPage() {
         </div>
       ) : (
         <>
-          {/* Search */}
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t('stock.searchPlaceholder')}
-            className="w-full border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-teal-500 transition-colors"
-          />
+          {/* Search + category filter (flat table scales better than a long
+              scrolling list as the medicine catalogue grows) */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={t('stock.searchPlaceholder')}
+              className="flex-1 min-w-0 border-2 border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-teal-500 transition-colors"
+            />
+            <select
+              value={catFilter}
+              onChange={(e) => setCatFilter(e.target.value)}
+              className="shrink-0 border-2 border-gray-200 rounded-xl px-2 py-2.5 text-sm bg-white focus:outline-none focus:border-teal-500"
+            >
+              {allCategories.map((c) => (
+                <option key={c} value={c}>{c === 'ALL' ? t('status.all', 'All') : t(`category.${c}`, c)}</option>
+              ))}
+            </select>
+          </div>
 
-          {categories.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 text-center">
               <p className="text-gray-400 text-sm">{t('stock.noMatch', { search })}</p>
             </div>
           ) : (
-            categories.map((category) => {
-              // Collapsed by default to cut vertical scroll — but a search
-              // implicitly expands every matching category so results stay
-              // visible without an extra tap.
-              const isExpanded = search.trim() !== '' || expandedCategories.has(category)
-              return (
-              <div key={category} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <button
-                  onClick={() => toggleCategory(category)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wide"
-                >
-                  <span>{t(`category.${category}`, category)} ({grouped[category].length})</span>
-                  <span className="text-gray-400" aria-hidden>{isExpanded ? '▾' : '▸'}</span>
-                </button>
-                {isExpanded && (
-                  <div className="divide-y divide-gray-50 border-t border-gray-50">
-                    {grouped[category].map((medicine) => (
-                      <div key={medicine.id} className="flex items-center gap-1.5 px-4 py-2.5">
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-800 truncate">{medicine.name}</p>
-                          <p className="text-xs text-gray-400">
-                            {t('stock.reorderLevel', { level: medicine.reorder_level, unit: medicine.unit })}
-                          </p>
-                        </div>
-
-                        <button
-                          onClick={() => handleQtyChange(medicine.id, -1)}
-                          className="w-8 h-8 shrink-0 rounded-full bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors"
-                        >
-                          −
-                        </button>
-
-                        <input
-                          type="number"
-                          min="0"
-                          value={medicine.qty || ''}
-                          onChange={(e) => handleQtyInput(medicine.id, e.target.value)}
-                          placeholder="0"
-                          className="w-14 shrink-0 text-center text-sm font-bold border-2 border-gray-200 rounded-lg py-1.5 focus:outline-none focus:border-teal-500 transition-colors"
-                        />
-
-                        <button
-                          onClick={() => handleQtyChange(medicine.id, 1)}
-                          className="w-8 h-8 shrink-0 rounded-full bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors"
-                        >
-                          +
-                        </button>
-
-                        <button
-                          onPointerDown={() => handleVoiceForMedicine(medicine.id)}
-                          onPointerUp={stopListening}
-                          className={clsx(
-                            'w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-sm shadow transition-all',
-                            isListening && voiceTarget === medicine.id
-                              ? 'bg-red-500 text-white animate-pulse'
-                              : 'bg-teal-600 text-white hover:bg-teal-700',
-                          )}
-                          title={t('stock.voiceHint')}
-                        >
-                          🎤
-                        </button>
-
-                        <button
-                          onClick={() => handleSave(medicine)}
-                          disabled={medicine.qty === 0}
-                          title={t('stock.saveUpdate')}
-                          className={clsx(
-                            'w-8 h-8 shrink-0 rounded-full flex items-center justify-center font-bold transition-colors disabled:opacity-30',
-                            savedIds.has(medicine.id)
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-teal-600 text-white hover:bg-teal-700',
-                          )}
-                        >
-                          ✓
-                        </button>
-                      </div>
-                    ))}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden divide-y divide-gray-50">
+              {filtered.map((medicine) => (
+                <div key={medicine.id} className="flex items-center gap-1.5 px-3 py-2.5">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{medicine.name}</p>
+                    <p className="text-xs text-gray-400">
+                      {t(`category.${medicine.category}`, medicine.category)} · {t('stock.reorderLevel', { level: medicine.reorder_level, unit: medicine.unit })}
+                    </p>
                   </div>
-                )}
-              </div>
-              )
-            })
+                  <button onClick={() => handleQtyChange(medicine.id, -1)}
+                    className="w-8 h-8 shrink-0 rounded-full bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">−</button>
+                  <input type="number" min="0" value={medicine.qty || ''}
+                    onChange={(e) => handleQtyInput(medicine.id, e.target.value)} placeholder="0"
+                    className="w-14 shrink-0 text-center text-sm font-bold border-2 border-gray-200 rounded-lg py-1.5 focus:outline-none focus:border-teal-500 transition-colors" />
+                  <button onClick={() => handleQtyChange(medicine.id, 1)}
+                    className="w-8 h-8 shrink-0 rounded-full bg-gray-100 text-gray-700 font-bold hover:bg-gray-200 transition-colors">+</button>
+                  <button onPointerDown={() => handleVoiceForMedicine(medicine.id)} onPointerUp={stopListening}
+                    className={clsx('w-8 h-8 shrink-0 rounded-full flex items-center justify-center text-sm shadow transition-all',
+                      isListening && voiceTarget === medicine.id ? 'bg-red-500 text-white animate-pulse' : 'bg-teal-600 text-white hover:bg-teal-700')}
+                    title={t('stock.voiceHint')}>🎤</button>
+                  <button onClick={() => handleSave(medicine)} disabled={medicine.qty === 0} title={t('stock.saveUpdate')}
+                    className={clsx('w-8 h-8 shrink-0 rounded-full flex items-center justify-center font-bold transition-colors disabled:opacity-30',
+                      savedIds.has(medicine.id) ? 'bg-green-100 text-green-700' : 'bg-teal-600 text-white hover:bg-teal-700')}>✓</button>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}

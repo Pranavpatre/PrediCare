@@ -7,6 +7,7 @@ import { syncPendingData } from './sync/syncService'
 import OfflineBanner from './components/OfflineBanner'
 import BottomNav from './components/BottomNav'
 import HelpModal from './components/HelpModal'
+import CheckInButton from './components/CheckInButton'
 import LoginPage from './pages/LoginPage'
 import DailyEntryPage from './pages/DailyEntryPage'
 import StockEntryPage from './pages/StockEntryPage'
@@ -20,49 +21,60 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-function LanguageToggle() {
+// Unified top bar: PrediCare branding + on-site check-in + help, the worker's
+// name/facility, and the language selector shown as parallel chips (all 10
+// languages, matching the admin dashboard) instead of a dropdown.
+function TopBar() {
   const { t, i18n } = useTranslation()
+  const { name, facilityName, token } = useAuthStore()
+  if (!token) return null
   return (
-    <div className="flex items-center justify-end gap-2 px-4 py-2 bg-white border-b border-gray-100">
-      <Link
-        to="/help"
-        aria-label={t('help.navLabel')}
-        className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 font-bold text-sm hover:bg-gray-100 transition-colors"
-      >
-        ?
-      </Link>
-      <select
-        value={i18n.language}
-        onChange={(e) => i18n.changeLanguage(e.target.value)}
-        aria-label="Language"
-        className="text-xs font-semibold px-2.5 py-1.5 rounded-md border border-gray-200 bg-gray-50 text-gray-700 focus:outline-none focus:border-teal-500"
-      >
-        {LANGUAGES.map((l) => (
-          <option key={l.code} value={l.code}>
-            {l.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  )
-}
-
-function WorkerHeader() {
-  const { name, facilityName } = useAuthStore()
-  if (!name && !facilityName) return null
-  return (
-    <div className="px-4 pt-2 bg-white">
-      <p className="text-sm font-semibold text-gray-800">{name}</p>
-      {facilityName && <p className="text-xs text-gray-400">{facilityName}</p>}
-    </div>
+    <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+      <div className="max-w-2xl mx-auto px-4 py-2 space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <img src="/favicon.svg" alt="" className="w-7 h-7 rounded-md shrink-0" />
+            <div className="leading-tight min-w-0">
+              <p className="font-bold text-teal-700 text-sm">PrediCare</p>
+              {facilityName && <p className="text-[11px] text-gray-400 truncate">{facilityName}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <CheckInButton />
+            <Link
+              to="/help"
+              aria-label={t('help.navLabel')}
+              className="w-8 h-8 flex items-center justify-center rounded-full border border-gray-200 bg-gray-50 text-gray-600 font-bold text-sm hover:bg-gray-100 transition-colors"
+            >
+              ?
+            </Link>
+          </div>
+        </div>
+        {name && <p className="text-xs text-gray-500">{name}</p>}
+        <div className="flex flex-wrap gap-1">
+          {LANGUAGES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => i18n.changeLanguage(l.code)}
+              className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+                i18n.language === l.code
+                  ? 'bg-teal-100 text-teal-700 font-semibold'
+                  : 'text-gray-500 hover:bg-gray-100'
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </header>
   )
 }
 
 function AppLayout() {
   return (
     <div className="pb-16">
-      <WorkerHeader />
-      <LanguageToggle />
+      <TopBar />
       <Outlet />
       <HelpModal />
     </div>

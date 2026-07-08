@@ -4,6 +4,7 @@ import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import FacilitiesPage from './pages/FacilitiesPage'
 import FacilityDetailPage from './pages/FacilityDetailPage'
+import StockPage from './pages/StockPage'
 import RedistributionPage from './pages/RedistributionPage'
 import AssistantPage from './pages/AssistantPage'
 import MyFacilityPage from './pages/MyFacilityPage'
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="facilities" element={<FacilitiesPage />} />
         <Route path="facilities/:id" element={<FacilityDetailPage />} />
+        <Route path="stock" element={<StockPage />} />
         <Route path="redistribution" element={<RedistributionPage />} />
         <Route path="assistant" element={<AssistantPage />} />
         <Route path="my-facility" element={<MyFacilityPage />} />

@@ -9,14 +9,22 @@ interface TourStep {
   descKey: string
 }
 
+// The tour walks through every screen the user can reach (what each one is
+// for), interleaved with the key sections on the dashboard itself. Steps with
+// an `anchor` scroll to that section on the dashboard; screen-overview steps
+// have no anchor and just explain the page. Reuses each screen's existing
+// localized subtitle so no screen goes untranslated.
 const STEPS: TourStep[] = [
   { icon: '👋', titleKey: 'tour.welcome_title', descKey: 'tour.welcome_desc' },
-  { anchor: 'kpi', icon: '📊', titleKey: 'dashboard.kpi_title', descKey: 'dashboard.info_kpi' },
+  { icon: '📊', titleKey: 'nav.dashboard', descKey: 'tour.screen_dashboard_desc' },
   { anchor: 'map', icon: '🗺️', titleKey: 'dashboard.district_map', descKey: 'dashboard.info_map' },
   { anchor: 'alerts', icon: '🔔', titleKey: 'dashboard.alert_feed', descKey: 'dashboard.info_alerts' },
   { anchor: 'at-risk', icon: '⚠️', titleKey: 'dashboard.bottom_facilities', descKey: 'dashboard.info_at_risk' },
-  { anchor: 'nearest', icon: '📍', titleKey: 'nearest.title', descKey: 'nearest.desc' },
-  { anchor: 'beds', icon: '🛏️', titleKey: 'beds.title', descKey: 'beds.desc' },
+  { icon: '🏥', titleKey: 'nav.facilities', descKey: 'tour.screen_facilities_desc' },
+  { icon: '🔄', titleKey: 'nav.redistribution', descKey: 'redist.subtitle' },
+  { icon: '📤', titleKey: 'nav.refer', descKey: 'referral.refer_subtitle' },
+  { icon: '📥', titleKey: 'nav.referrals', descKey: 'referral.retrieve_subtitle' },
+  { icon: '🤖', titleKey: 'nav.assistant', descKey: 'assistant.subtitle' },
 ]
 
 // Best-effort BCP-47 tags for the Web Speech API — actual voice availability

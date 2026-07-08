@@ -5,6 +5,7 @@ import sentry_sdk
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -59,6 +60,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Compress large JSON responses (e.g. the national /facilities/map payload with
+# ~52k markers is ~8MB uncompressed → ~1MB gzipped).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 

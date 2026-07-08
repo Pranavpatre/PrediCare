@@ -233,26 +233,19 @@ async def list_facilities(
     SUPERADMIN and STATE_ADMIN may pass an explicit district_id to cross-scope.
     Includes latest health_score and active alert count per facility.
     """
-    stmt = (
-        select(
-            Facility,
-            District.name.label("district_name"),
-            func.ST_Y(Facility.location).label("lat"),
-            func.ST_X(Facility.location).label("lng"),
-        )
-        .join(District, District.id == Facility.district_id)
-    )
-
-    # ── Scope to user's district unless privileged ────────────────────────
+    # Single set-based query (was an N+1: one latest-score + one alert-count
+    # query per facility — 2000 round-trips for page_size=1000, ~50s). Latest
+    # score comes from the mv_facility_latest_score materialized view (see
+    # migrations); alert counts are pre-aggregated in a CTE.
+    where: list[str] = []
+    params: dict[str, Any] = {}
     if current_user.role not in ("STATE_ADMIN", "SUPERADMIN"):
         if current_user.district_id is not None:
-            stmt = stmt.where(Facility.district_id == current_user.district_id)
+            where.append("f.district_id = :uds"); params["uds"] = current_user.district_id
         elif current_user.facility_id is not None:
-            stmt = stmt.where(Facility.id == current_user.facility_id)
-
+            where.append("f.id = :ufid"); params["ufid"] = str(current_user.facility_id)
     if district_id is not None:
-        stmt = stmt.where(Facility.district_id == district_id)
-
+        where.append("f.district_id = :did"); params["did"] = district_id
     if facility_type is not None:
         valid_types = {"PHC", "CHC", "SUB_CENTRE", "DISTRICT_HOSPITAL"}
         if facility_type.upper() not in valid_types:
@@ -260,37 +253,58 @@ async def list_facilities(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid facility_type. Must be one of: {', '.join(sorted(valid_types))}",
             )
-        stmt = stmt.where(Facility.facility_type == facility_type.upper())
+        where.append("f.facility_type = :ft"); params["ft"] = facility_type.upper()
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+    params["lim"] = page_size
+    params["off"] = (page - 1) * page_size
 
-    offset = (page - 1) * page_size
-    stmt = stmt.order_by(Facility.name).offset(offset).limit(page_size)
-    rows = (await db.execute(stmt)).all()
+    rows = (
+        await db.execute(
+            sa_text(
+                """
+                WITH alert_ct AS (
+                    SELECT facility_id, count(*) AS c FROM alerts
+                    WHERE status = 'OPEN' GROUP BY facility_id
+                )
+                SELECT f.id, f.district_id, f.code, f.name, f.facility_type,
+                       f.address, f.bed_capacity, f.created_at,
+                       ST_Y(f.location) AS lat, ST_X(f.location) AS lng,
+                       d.name AS district_name,
+                       l.overall_score, l.status, COALESCE(ac.c, 0) AS alerts
+                FROM facilities f
+                JOIN districts d ON d.id = f.district_id
+                LEFT JOIN mv_facility_latest_score l ON l.facility_id = f.id
+                LEFT JOIN alert_ct ac ON ac.facility_id = f.id
+                """
+                + where_sql
+                + " ORDER BY f.name OFFSET :off LIMIT :lim"
+            ),
+            params,
+        )
+    ).all()
 
     results: list[FacilityResponse] = []
-    for facility, district_name, lat, lng in rows:
-        hs = await _get_latest_health_score(facility.id, db)
-        alert_count = await _get_active_alert_count(facility.id, db)
-        score = float(hs.overall_score) if hs and hs.overall_score is not None else None
-        status_light = hs.status if hs else None
+    for r in rows:
+        score = float(r.overall_score) if r.overall_score is not None else None
         results.append(
             FacilityResponse(
-                id=facility.id,
-                district_id=facility.district_id,
-                code=facility.code,
-                name=facility.name,
-                facility_type=facility.facility_type,
-                address=facility.address,
-                bed_capacity=facility.bed_capacity,
-                created_at=facility.created_at,
-                lat=float(lat) if lat is not None else None,
-                lng=float(lng) if lng is not None else None,
-                district_name=district_name,
-                latest_health_score=hs.overall_score if hs else None,
-                health_score_status=status_light,
-                active_alert_count=alert_count,
+                id=r.id,
+                district_id=r.district_id,
+                code=r.code,
+                name=r.name,
+                facility_type=r.facility_type,
+                address=r.address,
+                bed_capacity=r.bed_capacity,
+                created_at=r.created_at,
+                lat=float(r.lat) if r.lat is not None else None,
+                lng=float(r.lng) if r.lng is not None else None,
+                district_name=r.district_name,
+                latest_health_score=r.overall_score,
+                health_score_status=r.status,
+                active_alert_count=int(r.alerts),
                 health_score=score,
-                traffic_light=status_light,
-                active_alerts=alert_count,
+                traffic_light=r.status,
+                active_alerts=int(r.alerts),
             )
         )
 
@@ -343,11 +357,6 @@ async def facility_stats(
         await db.execute(
             sa_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
-                    FROM facility_health_scores
-                    ORDER BY facility_id, time DESC
-                )
                 SELECT
                     count(f.id) AS total,
                     count(*) FILTER (WHERE l.status = 'GREEN')  AS green,
@@ -356,7 +365,7 @@ async def facility_stats(
                     count(*) FILTER (WHERE l.status IS NULL)    AS unscored,
                     round(avg(l.overall_score), 1)              AS avg_score
                 FROM facilities f
-                LEFT JOIN latest l ON l.facility_id = f.id
+                LEFT JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 {where}
                 """
             ),
@@ -408,16 +417,11 @@ async def facilities_map(
         await db.execute(
             sa_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
-                    FROM facility_health_scores
-                    ORDER BY facility_id, time DESC
-                )
                 SELECT f.id, f.name,
                        ST_Y(f.location) AS lat, ST_X(f.location) AS lng,
                        l.status AS traffic_light, l.overall_score AS health_score
                 FROM facilities f
-                LEFT JOIN latest l ON l.facility_id = f.id
+                LEFT JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 {where}
                 """
             ),
@@ -553,19 +557,14 @@ async def at_risk_facilities(
         await db.execute(
             sa_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id) facility_id, status, overall_score
-                    FROM facility_health_scores
-                    ORDER BY facility_id, time DESC
-                ),
-                alert_counts AS (
+                WITH alert_counts AS (
                     SELECT facility_id, count(*) AS c FROM alerts
                     WHERE status = 'OPEN' GROUP BY facility_id
                 )
                 SELECT f.id, f.code, f.name, f.facility_type,
                        l.status, l.overall_score, COALESCE(ac.c, 0) AS alerts
                 FROM facilities f
-                JOIN latest l ON l.facility_id = f.id
+                JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 LEFT JOIN alert_counts ac ON ac.facility_id = f.id
                 {where}
                 ORDER BY l.overall_score ASC
@@ -682,22 +681,20 @@ async def browse_facilities(
         where.append("f.name ILIKE :q"); params["q"] = f"%{search}%"
     where_sql = (" WHERE " + " AND ".join(where)) if where else ""
 
+    # Latest score and latest snapshot both come from materialized views (see
+    # migrations / scoring task refresh) — this was a pair of DISTINCT ON scans
+    # over facility_health_scores (~60s) and daily_snapshots (~12s) at national
+    # scale. Alert counts are pre-aggregated in a CTE.
     cte = (
-        "WITH latest_hs AS ("
-        "  SELECT DISTINCT ON (facility_id) facility_id, overall_score, status, medicine_score"
-        "  FROM facility_health_scores ORDER BY facility_id, time DESC), "
-        "latest_snap AS ("
-        "  SELECT DISTINCT ON (facility_id) facility_id, doctors_present, opd_count, beds_occupied"
-        "  FROM daily_snapshots ORDER BY facility_id, time DESC), "
-        "alert_ct AS ("
+        "WITH alert_ct AS ("
         "  SELECT facility_id, count(*) AS c FROM alerts WHERE status = 'OPEN' GROUP BY facility_id) "
     )
     joins = (
         " FROM facilities f"
         " JOIN districts d ON d.id = f.district_id"
         " JOIN states s ON s.id = d.state_id"
-        " LEFT JOIN latest_hs hs ON hs.facility_id = f.id"
-        " LEFT JOIN latest_snap snap ON snap.facility_id = f.id"
+        " LEFT JOIN mv_facility_latest_score hs ON hs.facility_id = f.id"
+        " LEFT JOIN mv_facility_latest_snapshot snap ON snap.facility_id = f.id"
         " LEFT JOIN alert_ct al ON al.facility_id = f.id"
     )
 

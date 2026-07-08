@@ -190,14 +190,9 @@ async def query_assistant(
         await db.execute(
             sqla_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id) facility_id, overall_score
-                    FROM facility_health_scores
-                    ORDER BY facility_id, time DESC
-                )
                 SELECT AVG(l.overall_score) AS avg_score
                 FROM facilities f
-                JOIN latest l ON l.facility_id = f.id
+                JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 WHERE 1=1 {_dcond}
                 """
             ),
@@ -217,14 +212,6 @@ async def query_assistant(
         await db.execute(
             sqla_text(
                 f"""
-                WITH latest AS (
-                    SELECT DISTINCT ON (facility_id)
-                        facility_id, overall_score, status,
-                        medicine_score, doctor_score, bed_score,
-                        wait_time_score, diagnostics_score
-                    FROM facility_health_scores
-                    ORDER BY facility_id, time DESC
-                )
                 SELECT
                     f.name AS facility_name,
                     l.overall_score,
@@ -235,7 +222,7 @@ async def query_assistant(
                     l.wait_time_score,
                     l.diagnostics_score
                 FROM facilities f
-                JOIN latest l ON l.facility_id = f.id
+                JOIN mv_facility_latest_score l ON l.facility_id = f.id
                 WHERE l.overall_score < 45 {_dcond}
                 ORDER BY l.overall_score ASC
                 LIMIT 10
