@@ -23,6 +23,60 @@ from celery_app import celery_app
 log = structlog.get_logger(__name__)
 
 
+# ── Status band configuration ────────────────────────────────────────────────
+# District-relative bands peer-benchmark each facility against its district while
+# keeping absolute guardrails, so a healthy district isn't forced to have a
+# "worst" facility flagged RED and a struggling district's genuinely
+# under-resourced facilities still read RED. All tunable via env for rollback.
+RELATIVE_BANDS = os.environ.get("SCORING_RELATIVE_BANDS", "true").lower() != "false"
+ABS_FLOOR = float(os.environ.get("SCORING_ABS_FLOOR", "40"))   # below → RED regardless of peers
+ABS_GREEN = float(os.environ.get("SCORING_ABS_GREEN", "70"))   # at/above → GREEN regardless of peers
+MIN_DISTRICT_N = int(os.environ.get("SCORING_MIN_DISTRICT_N", "4"))  # need this many facilities to rank
+# Absolute fallback bands (small districts / relative disabled).
+ABS_GREEN_CUT = 70.0
+ABS_YELLOW_CUT = 45.0
+
+
+def _district_thresholds(scores: list[float]) -> tuple[float, float] | None:
+    """Tercile (33rd, 67th pct) cut points for a district's score distribution,
+    used to rank facilities against their peers. Returns None to signal 'use the
+    absolute fallback bands' — when relative banding is disabled or the district
+    has too few facilities (< MIN_DISTRICT_N) to rank meaningfully."""
+    import statistics
+
+    if not RELATIVE_BANDS or len(scores) < MIN_DISTRICT_N:
+        return None
+    yellow_cut, green_cut = statistics.quantiles(scores, n=3, method="inclusive")
+    return (yellow_cut, green_cut)
+
+
+def _classify_status(
+    score: float,
+    bands: tuple[float, float] | None,
+    has_critical: bool,
+) -> str:
+    """Assign GREEN/YELLOW/RED. An open CRITICAL alert always forces RED. With no
+    district bands (small district / relative disabled) the classic absolute
+    70/45 bands apply. Otherwise absolute guardrails decide the clearly-bad
+    (< ABS_FLOOR → RED) and clearly-good (>= ABS_GREEN → GREEN), and the
+    contested middle is split by the district's terciles."""
+    if has_critical:
+        return "RED"
+    if bands is None:
+        if score >= ABS_GREEN_CUT:
+            return "GREEN"
+        return "YELLOW" if score >= ABS_YELLOW_CUT else "RED"
+    # District-relative with absolute guardrails.
+    if score < ABS_FLOOR:
+        return "RED"
+    if score >= ABS_GREEN:
+        return "GREEN"
+    yellow_cut, green_cut = bands
+    if score >= green_cut:
+        return "GREEN"
+    return "YELLOW" if score >= yellow_cut else "RED"
+
+
 def _sync_db_url() -> str:
     url = os.environ.get("DATABASE_URL", "")
     return url.replace("postgresql+asyncpg://", "postgresql://")
@@ -87,7 +141,12 @@ def run_health_scores(self) -> dict:
 
     Overall = 0.25·med + 0.20·doc + 0.20·bed + 0.20·wait + 0.15·diag
 
-    Status thresholds: GREEN ≥ 70, YELLOW ≥ 45, RED < 45
+    Status: assigned in a second pass so bands can be DISTRICT-RELATIVE. Absolute
+    guardrails force RED below ABS_FLOOR (objectively under-resourced) and GREEN
+    at/above ABS_GREEN (objectively adequate); the contested middle is split by
+    the district's terciles. Small districts (< MIN_DISTRICT_N) and
+    SCORING_RELATIVE_BANDS=false fall back to absolute 70/45. An open CRITICAL
+    alert always forces RED. See _classify_status / _district_thresholds.
     """
     import psycopg2
     import psycopg2.extras
@@ -98,16 +157,17 @@ def run_health_scores(self) -> dict:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
         cur.execute(
-            "SELECT id, bed_capacity FROM facilities ORDER BY id"
+            "SELECT id, bed_capacity, district_id FROM facilities ORDER BY id"
         )
         facilities = cur.fetchall()
 
-        scored = 0
+        computed: list[dict] = []
         skipped = 0
 
         for fac in facilities:
             fac_id = str(fac["id"])
             bed_capacity: int = max(fac["bed_capacity"] or 10, 1)
+            district_id = fac["district_id"]
 
             try:
                 # ── Medicine score ───────────────────────────────────────────
@@ -215,18 +275,13 @@ def run_health_scores(self) -> dict:
                     + 0.15 * diagnostics_score,
                     1,
                 )
-                status = (
-                    "GREEN" if overall_score >= 70
-                    else ("YELLOW" if overall_score >= 45 else "RED")
-                )
-
-                # ── Critical-alert override ──────────────────────────────────
+                # ── Critical-alert flag ──────────────────────────────────────
                 # The composite score averages across all medicines/diagnostics,
                 # so a single critical shortage (e.g. one stocked-out medicine
                 # among many well-stocked ones) can get diluted and never pull
-                # the facility below the GREEN/YELLOW threshold. Any facility
-                # with an OPEN CRITICAL alert must show RED regardless of the
-                # averaged score — one critical stockout is enough to flag it.
+                # the facility below its band. Any facility with an OPEN CRITICAL
+                # alert must show RED regardless of the averaged score / district
+                # rank — one critical stockout is enough to flag it.
                 cur.execute(
                     """
                     SELECT 1 FROM alerts
@@ -235,34 +290,25 @@ def run_health_scores(self) -> dict:
                     """,
                     (fac_id,),
                 )
-                if cur.fetchone():
-                    status = "RED"
+                has_critical = cur.fetchone() is not None
 
-                # ── Persist (must supply `time`) ──────────────────────────────
-                cur.execute(
-                    """
-                    INSERT INTO facility_health_scores (
-                        time, facility_id,
-                        medicine_score, doctor_score, bed_score,
-                        wait_time_score, diagnostics_score,
-                        overall_score, status
-                    )
-                    VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        fac_id,
-                        medicine_score,
-                        doctor_score,
-                        bed_score,
-                        wait_time_score,
-                        diagnostics_score,
-                        overall_score,
-                        status,
-                    ),
-                )
-                scored += 1
+                # Status is assigned in a second pass below, once every facility's
+                # score is known, so bands can be set relative to district peers.
+                computed.append({
+                    "fac_id": fac_id,
+                    "district_id": district_id,
+                    "med": medicine_score,
+                    "doc": doctor_score,
+                    "bed": bed_score,
+                    "wait": wait_time_score,
+                    "diag": diagnostics_score,
+                    "overall": overall_score,
+                    "has_critical": has_critical,
+                })
 
             except Exception as fac_err:
+                # Reset the aborted transaction state (reads only up to here) and
+                # skip this facility.
                 conn.rollback()
                 skipped += 1
                 log.error(
@@ -271,6 +317,49 @@ def run_health_scores(self) -> dict:
                     error=str(fac_err),
                 )
                 continue
+
+        # ── District-relative status bands (second pass) ─────────────────────
+        # Peer-benchmark each facility against its district cohort. See
+        # _classify_status / _district_thresholds for the hybrid band logic.
+        from collections import defaultdict
+
+        by_district: dict = defaultdict(list)
+        for c in computed:
+            by_district[c["district_id"]].append(c["overall"])
+        district_bands = {
+            did: _district_thresholds(scores)
+            for did, scores in by_district.items()
+        }
+
+        # ── Persist (single batch INSERT; must supply `time`) ────────────────
+        from psycopg2.extras import execute_values
+
+        rows = []
+        for c in computed:
+            status = _classify_status(
+                c["overall"],
+                district_bands.get(c["district_id"]),
+                c["has_critical"],
+            )
+            rows.append((
+                c["fac_id"], c["med"], c["doc"], c["bed"],
+                c["wait"], c["diag"], c["overall"], status,
+            ))
+        if rows:
+            execute_values(
+                cur,
+                """
+                INSERT INTO facility_health_scores (
+                    time, facility_id,
+                    medicine_score, doctor_score, bed_score,
+                    wait_time_score, diagnostics_score,
+                    overall_score, status
+                ) VALUES %s
+                """,
+                rows,
+                template="(NOW(), %s, %s, %s, %s, %s, %s, %s, %s)",
+            )
+        scored = len(rows)
 
         conn.commit()
 

@@ -107,3 +107,50 @@ def test_demand_usage_rates_seeded():
         assert cur.fetchone()[0] >= 1
     finally:
         conn.close()
+
+
+# ── District-relative status bands (pure functions, no DB) ────────────────────
+
+def test_classify_absolute_fallback_when_no_bands():
+    from tasks.scoring_tasks import _classify_status
+    # bands=None → classic absolute 70/45
+    assert _classify_status(72, None, False) == "GREEN"
+    assert _classify_status(50, None, False) == "YELLOW"
+    assert _classify_status(30, None, False) == "RED"
+
+
+def test_classify_critical_alert_forces_red():
+    from tasks.scoring_tasks import _classify_status
+    assert _classify_status(95, None, True) == "RED"
+    assert _classify_status(95, (50, 60), True) == "RED"
+
+
+def test_classify_absolute_guardrails_override_relative():
+    from tasks.scoring_tasks import _classify_status
+    # Below floor → RED even if it would out-rank district peers.
+    assert _classify_status(35, (10, 20), False) == "RED"
+    # At/above ceiling → GREEN even if bottom of a high-performing district.
+    assert _classify_status(78, (80, 85), False) == "GREEN"
+
+
+def test_classify_relative_middle_uses_terciles():
+    from tasks.scoring_tasks import _classify_status
+    bands = (50.0, 60.0)  # yellow_cut, green_cut
+    # A 55 is "good enough for a struggling district" → not RED.
+    assert _classify_status(55, bands, False) == "YELLOW"
+    assert _classify_status(65, bands, False) == "GREEN"
+    assert _classify_status(48, bands, False) == "RED"
+
+
+def test_district_thresholds_small_district_returns_none():
+    from tasks.scoring_tasks import _district_thresholds
+    # Fewer than MIN_DISTRICT_N (4) facilities → absolute fallback.
+    assert _district_thresholds([60, 70]) is None
+
+
+def test_district_thresholds_ranks_larger_district():
+    from tasks.scoring_tasks import _district_thresholds
+    bands = _district_thresholds([30, 40, 50, 60, 70, 80])
+    assert bands is not None
+    yellow_cut, green_cut = bands
+    assert yellow_cut <= green_cut
