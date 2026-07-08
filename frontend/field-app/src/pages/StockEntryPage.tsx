@@ -6,6 +6,7 @@ import { useVoiceInput, parseSpokenNumber, VOICE_LANG_MAP } from '../hooks/useVo
 import { syncPendingData, fetchAndCacheMedicines } from '../sync/syncService'
 import InfoNote from '../components/InfoNote'
 import VoiceRecordingBanner from '../components/VoiceRecordingBanner'
+import BedTestEntry from '../components/BedTestEntry'
 import clsx from 'clsx'
 
 function generateClientId() {
@@ -221,6 +222,9 @@ export default function StockEntryPage() {
           )}
         </>
       )}
+
+      {/* Test availability lives here alongside medicine stock */}
+      <BedTestEntry section="tests" />
 
       {/* Sync */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">

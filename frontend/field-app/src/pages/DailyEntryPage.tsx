@@ -168,8 +168,8 @@ export default function DailyEntryPage() {
         {/* Per-doctor attendance */}
         <DoctorAttendance />
 
-        {/* Bed matrix + test availability — daily field-worker inputs */}
-        <BedTestEntry />
+        {/* Bed matrix — daily field-worker input (with per-type "occupied until") */}
+        <BedTestEntry section="beds" />
 
         {/* Sync */}
         <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-2">

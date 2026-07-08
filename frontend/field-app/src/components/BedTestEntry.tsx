@@ -5,12 +5,14 @@ import { useAuthStore } from '../stores/authStore'
 import { queueLedger, syncPendingData } from '../sync/syncService'
 import InfoNote from './InfoNote'
 
-// Bed matrix + test availability — daily field-worker inputs (in the Daily Entry
-// tab). Beds also capture an "occupied until" date so the admin dashboard can
-// project future availability. Offline-first (queued + synced like the rest).
+// Daily field-worker inputs. Rendered as one section at a time:
+//  - section="beds"  → Bed Matrix (in Daily Entry); captures an "occupied until"
+//                      date per type so admin can project future availability.
+//  - section="tests" → Test Availability (in the Stock tab, beside medicines).
+// Offline-first (queued + synced like the rest).
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-export default function BedTestEntry() {
+export default function BedTestEntry({ section }: { section: 'beds' | 'tests' }) {
   const { t } = useTranslation()
   const { facilityId, token } = useAuthStore()
   const authHdr = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }
@@ -24,14 +26,20 @@ export default function BedTestEntry() {
   useEffect(() => {
     if (!facilityId || !token) return
     setLoading(true)
-    Promise.all([
-      fetch(`${API}/api/v1/ledger/beds/${facilityId}`, { headers: authHdr })
-        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setBeds(d.beds)).catch(() => {}),
-      fetch(`${API}/api/v1/ledger/tests/${facilityId}`, { headers: authHdr })
-        .then((r) => (r.ok ? r.json() : null)).then((d) => d && setTests(d.tests)).catch(() => {}),
-    ]).finally(() => setLoading(false))
+    const url = section === 'beds'
+      ? `${API}/api/v1/ledger/beds/${facilityId}`
+      : `${API}/api/v1/ledger/tests/${facilityId}`
+    fetch(url, { headers: authHdr })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return
+        if (section === 'beds') setBeds(d.beds)
+        else setTests(d.tests)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [facilityId, token])
+  }, [facilityId, token, section])
 
   const setOccupied = (bedType: string, delta: number) =>
     setBeds((prev) => prev.map((b) => b.bed_type === bedType
@@ -58,9 +66,8 @@ export default function BedTestEntry() {
     if (navigator.onLine) await syncPendingData()
   }
 
-  return (
-    <>
-      {/* Bed Matrix */}
+  if (section === 'beds') {
+    return (
       <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
         <h2 className="text-base font-semibold text-gray-800">{t('beds.title')}</h2>
         <InfoNote>{t('info.beds')}</InfoNote>
@@ -95,27 +102,28 @@ export default function BedTestEntry() {
           {bedsSaved ? t('beds.saved') : t('beds.save')}
         </button>
       </section>
+    )
+  }
 
-      {/* Test Availability */}
-      <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
-        <h2 className="text-base font-semibold text-gray-800">{t('tests.title')}</h2>
-        <InfoNote>{t('info.tests')}</InfoNote>
-        {loading && tests.length === 0 ? (
-          <p className="text-sm text-gray-400">…</p>
-        ) : tests.map((tst) => (
-          <div key={tst.test_id} className="flex items-center justify-between">
-            <span className="text-sm text-gray-800">{tst.test_name}</span>
-            <button onClick={() => toggleTest(tst.test_id)}
-              className={clsx('px-4 py-1.5 rounded-full text-xs font-bold transition-all',
-                tst.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
-              {tst.available ? t('tests.available') : t('tests.unavailable')}
-            </button>
-          </div>
-        ))}
-        <button onClick={saveTests} className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
-          {testsSaved ? t('tests.saved') : t('tests.save')}
-        </button>
-      </section>
-    </>
+  return (
+    <section className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 space-y-3">
+      <h2 className="text-base font-semibold text-gray-800">{t('tests.title')}</h2>
+      <InfoNote>{t('info.tests')}</InfoNote>
+      {loading && tests.length === 0 ? (
+        <p className="text-sm text-gray-400">…</p>
+      ) : tests.map((tst) => (
+        <div key={tst.test_id} className="flex items-center justify-between">
+          <span className="text-sm text-gray-800">{tst.test_name}</span>
+          <button onClick={() => toggleTest(tst.test_id)}
+            className={clsx('px-4 py-1.5 rounded-full text-xs font-bold transition-all',
+              tst.available ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700')}>
+            {tst.available ? t('tests.available') : t('tests.unavailable')}
+          </button>
+        </div>
+      ))}
+      <button onClick={saveTests} className="w-full py-2.5 rounded-xl bg-teal-600 text-white font-semibold hover:bg-teal-700 transition-colors">
+        {testsSaved ? t('tests.saved') : t('tests.save')}
+      </button>
+    </section>
   )
 }
