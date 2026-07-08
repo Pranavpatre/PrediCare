@@ -87,3 +87,9 @@ export const downloadCapacityCsv = (scope: Scope, concern: 'DOCTORS' | 'BEDS') =
 
 export const downloadRedistributionCsv = (scope: Scope) =>
   downloadCsv('/planning/doctor-redistribution.csv', scope, 'doctor_redistribution')
+
+// Email the refill CSV to an address on demand.
+export const emailRefills = async (scope: Scope, email: string) => {
+  const { data } = await apiClient.post('/planning/email', { ...scope, email })
+  return data as { sent: boolean; items: number; email: string }
+}

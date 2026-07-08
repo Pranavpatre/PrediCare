@@ -430,3 +430,34 @@ async def planning_doctor_redistribution_csv(
     fname = f"doctor_redistribution_{date.today().isoformat()}.csv"
     return Response(content=buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{fname}"'})
+
+
+class EmailRequest(BaseModel):
+    email: str
+    state_id: int | None = None
+    district_id: int | None = None
+
+
+@router.post("/email")
+async def planning_email(
+    body: EmailRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(_field_plus),
+) -> dict:
+    """Email the refill list (as a CSV) to the given address on demand."""
+    from starlette.concurrency import run_in_threadpool
+
+    from services.planning_core import refills_to_csv
+    from tasks.planning_tasks import _send_email
+
+    where_sql, params = _resolve_scope(current_user, body.state_id, body.district_id)
+    items = await _compute_refills(db, where_sql, params, HORIZON_DAYS)
+    csv_text = refills_to_csv(items)
+    fname = f"planning_refills_{date.today().isoformat()}.csv"
+    subject = f"PrediCare planning — {len(items)} refills due"
+    bodytext = (
+        f"Attached: {len(items)} facility-medicine refills needed in the next "
+        f"{HORIZON_DAYS} days. Forward to your supply POCs."
+    )
+    sent = await run_in_threadpool(_send_email, body.email, subject, bodytext, csv_text, fname)
+    return {"sent": sent, "items": len(items), "email": body.email}

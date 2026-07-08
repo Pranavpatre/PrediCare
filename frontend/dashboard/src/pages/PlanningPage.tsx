@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { getRefills, getCapacity, getDoctorRedistribution, downloadRefillsCsv } from '../api/planning'
+import {
+  getRefills, getCapacity, getDoctorRedistribution,
+  downloadRefillsCsv, downloadCapacityCsv, downloadRedistributionCsv, emailRefills,
+} from '../api/planning'
 import { getStates, getDistricts } from '../api/facilities'
 import { useAuthStore } from '../stores/authStore'
 import { formatNumber } from '../lib/format'
@@ -21,6 +24,10 @@ const URGENCY: Record<string, string> = {
 export default function PlanningPage() {
   const { t } = useTranslation()
   const { role, stateId: uState } = useAuthStore()
+  // The user's server-side scope (updated when they set their GPS location) —
+  // included in the query keys so the list auto-refreshes when location changes.
+  const authDistrictId = useAuthStore((s) => s.districtId)
+  const authStateId = useAuthStore((s) => s.stateId)
   const isNational = role === 'SUPERADMIN'
   const isState = role === 'STATE_ADMIN'
   const isScoped = !isNational && !isState  // district officer → auto-scoped
@@ -28,10 +35,13 @@ export default function PlanningPage() {
   const [stateId, setStateId] = useState<number | undefined>(isState ? uState ?? undefined : undefined)
   const [districtId, setDistrictId] = useState<number | undefined>(undefined)
   const [downloading, setDownloading] = useState(false)
+  const [email, setEmail] = useState('')
+  const [emailMsg, setEmailMsg] = useState<string | null>(null)
 
   const scope = isScoped ? {} : { state_id: stateId, district_id: districtId }
   const ready = isScoped || stateId != null || districtId != null
-  const scopeKey = [isScoped, stateId, districtId]
+  // authDistrictId/authStateId force a refetch when the user's GPS location updates.
+  const scopeKey = [isScoped, stateId, districtId, authDistrictId, authStateId]
 
   const { data: states = [] } = useQuery({ queryKey: ['states'], queryFn: getStates, enabled: isNational })
   const { data: districts = [] } = useQuery({
@@ -60,6 +70,16 @@ export default function PlanningPage() {
     setDownloading(true)
     try { await downloadRefillsCsv(scope) } finally { setDownloading(false) }
   }
+  const onEmail = async () => {
+    if (!email.trim()) return
+    setEmailMsg(t('planning.emailing', 'Sending…'))
+    try {
+      const r = await emailRefills(scope, email.trim())
+      setEmailMsg(r.sent
+        ? t('planning.email_sent', `Sent ${r.items} items to ${r.email}`)
+        : t('planning.email_failed', 'Email not configured on the server'))
+    } catch { setEmailMsg(t('planning.email_failed', 'Could not send')) }
+  }
 
   return (
     <div className="space-y-6">
@@ -70,13 +90,25 @@ export default function PlanningPage() {
             {t('planning.subtitle', 'Pre-emptive stock & capacity actionables — order before the shortage.')}
           </p>
         </div>
-        <button
-          onClick={onDownload}
-          disabled={!ready || !items.length || downloading}
-          className="bg-teal-600 text-white font-semibold px-4 py-2.5 rounded-lg hover:bg-teal-700 disabled:opacity-40 transition-colors text-sm"
-        >
-          {downloading ? t('planning.preparing', 'Preparing…') : t('planning.download_csv', '⬇ Download supplier CSV')}
-        </button>
+        <div className="flex flex-col items-end gap-1.5">
+          <button
+            onClick={onDownload}
+            disabled={!ready || !items.length || downloading}
+            className="bg-teal-600 text-white font-semibold px-4 py-2.5 rounded-lg hover:bg-teal-700 disabled:opacity-40 transition-colors text-sm"
+          >
+            {downloading ? t('planning.preparing', 'Preparing…') : t('planning.download_csv', '⬇ Download supplier CSV')}
+          </button>
+          <div className="flex items-center gap-1">
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+              placeholder={t('planning.email_ph', 'you@email.com')}
+              className="border border-gray-300 rounded-lg px-2 py-1.5 text-xs w-44 focus:ring-2 focus:ring-teal-500 outline-none" />
+            <button onClick={onEmail} disabled={!ready || !email.trim()}
+              className="text-xs font-semibold text-teal-700 border border-teal-200 rounded-lg px-2.5 py-1.5 hover:bg-teal-50 disabled:opacity-40">
+              {t('planning.email_btn', '✉ Email CSV')}
+            </button>
+          </div>
+          {emailMsg && <span className="text-[11px] text-gray-500">{emailMsg}</span>}
+        </div>
       </div>
 
       {/* Scope pickers (national picks state+district; state admin narrows by district) */}
@@ -162,6 +194,14 @@ export default function PlanningPage() {
             tone={doctorItems.length ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}
             subtitle={moves.length ? `${moves.length} ${t('planning.redistribution_moves', 'redistribution moves')}` : undefined}
           >
+            {doctorItems.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button onClick={() => downloadCapacityCsv(scope, 'DOCTORS')}
+                  className="text-xs font-semibold text-teal-700 border border-teal-200 rounded-lg px-2.5 py-1 hover:bg-teal-50">
+                  {t('planning.download_csv', '⬇ Download CSV')}
+                </button>
+              </div>
+            )}
             {doctorItems.length === 0 ? (
               <p className="text-gray-400 text-sm p-2">{t('planning.no_doctor_gap', 'No facilities under-staffed on doctors.')}</p>
             ) : (
@@ -181,10 +221,18 @@ export default function PlanningPage() {
 
             {/* Doctor redistribution plan — move surplus doctors to nearby shortages */}
             <div className="mt-4 pt-3 border-t border-gray-100">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">
-                {t('planning.redistribution_title', 'Doctor redistribution plan')}
-                <span className="ml-2 text-xs font-normal text-gray-400">{t('planning.redistribution_note', 'surplus → nearby shortage (≤ 50 km)')}</span>
-              </h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">
+                  {t('planning.redistribution_title', 'Doctor redistribution plan')}
+                  <span className="ml-2 text-xs font-normal text-gray-400">{t('planning.redistribution_note', 'surplus → nearby shortage (≤ 50 km)')}</span>
+                </h3>
+                {moves.length > 0 && (
+                  <button onClick={() => downloadRedistributionCsv(scope)}
+                    className="text-xs font-semibold text-teal-700 border border-teal-200 rounded-lg px-2.5 py-1 hover:bg-teal-50">
+                    {t('planning.download_csv', '⬇ Download CSV')}
+                  </button>
+                )}
+              </div>
               {moves.length === 0 ? (
                 <p className="text-gray-400 text-sm">{t('planning.no_moves', 'No nearby surplus available to redistribute.')}</p>
               ) : (
@@ -213,6 +261,14 @@ export default function PlanningPage() {
             count={bedItems.length}
             tone={bedItems.length ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-500'}
           >
+            {bedItems.length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button onClick={() => downloadCapacityCsv(scope, 'BEDS')}
+                  className="text-xs font-semibold text-teal-700 border border-teal-200 rounded-lg px-2.5 py-1 hover:bg-teal-50">
+                  {t('planning.download_csv', '⬇ Download CSV')}
+                </button>
+              </div>
+            )}
             {bedItems.length === 0 ? (
               <p className="text-gray-400 text-sm p-2">{t('planning.no_bed_gap', 'No facilities near bed capacity.')}</p>
             ) : (

@@ -48,11 +48,19 @@ export default function LocationBadge() {
       title={error
         ? t('location.blocked', 'Location blocked — enable location for this site, then tap again')
         : t('location.tap', 'Tap to set the dashboard to your current location')}
-      className={`flex items-center gap-1 rounded-full text-xs font-semibold px-2.5 py-1 max-w-[18rem] truncate transition-colors ${
-        error ? 'bg-red-50 text-red-600' : 'bg-teal-50 text-teal-700 hover:bg-teal-100'
+      className={`relative flex items-center gap-1 rounded-full text-xs font-semibold px-2.5 py-1 max-w-[18rem] truncate transition-colors ${
+        error ? 'bg-red-50 text-red-600'
+          : 'bg-teal-50 text-teal-700 hover:bg-teal-100 ring-1 ring-teal-300'
       }`}
     >
-      📍 {label}
+      {/* Pulsing dot cues the user to tap to update their location. */}
+      {!locating && !error && (
+        <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-teal-500" />
+        </span>
+      )}
+      <span className={locating ? 'animate-pulse' : ''}>📍</span> {label}
     </button>
   )
 }
